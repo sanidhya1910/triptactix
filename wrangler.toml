@@ -1,0 +1,23 @@
+name = "triptactix"
+compatibility_date = "2024-01-01"
+pages_build_output_dir = "out"
+
+# D1 Database
+[[d1_databases]]
+binding = "DB"
+database_name = "triptactix-db"
+database_id = "9364b3a4-22a8-42ab-9d10-a382313bcb54"
+
+[env.production]
+name = "triptactix"
+
+# D1 Database for production
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "triptactix-db"
+database_id = "9364b3a4-22a8-42ab-9d10-a382313bcb54"
+
+# Environment variables for production
+[env.production.vars]
+NODE_ENV = "production"
+NEXTAUTH_URL = "https://triptactix.pages.dev"
