@@ -7,6 +7,13 @@ export async function onRequestPost(context: any) {
   const { request, env } = context;
   const { RAPIDAPI_KEY } = env as Env;
 
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Content-Type': 'application/json'
+  };
+
   try {
     const body = await request.json();
     const { type, searchParams } = body;
@@ -17,7 +24,7 @@ export async function onRequestPost(context: any) {
         error: 'API key not configured' 
       }), {
         status: 500,
-        headers: { 'Content-Type': 'application/json' }
+        headers: corsHeaders
       });
     }
 
@@ -158,7 +165,7 @@ export async function onRequestPost(context: any) {
       success: true, 
       results 
     }), {
-      headers: { 'Content-Type': 'application/json' }
+      headers: corsHeaders
     });
 
   } catch (error) {
@@ -168,7 +175,18 @@ export async function onRequestPost(context: any) {
       error: 'Search failed' 
     }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' }
+      headers: corsHeaders
     });
   }
+}
+
+// Handle OPTIONS requests for CORS
+export async function onRequestOptions() {
+  return new Response(null, {
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type'
+    }
+  });
 }

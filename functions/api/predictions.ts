@@ -5,6 +5,13 @@ interface Env {
 export async function onRequestPost(context: any) {
   const { request, env } = context;
 
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Content-Type': 'application/json'
+  };
+
   try {
     const body = await request.json();
     const { searchParams } = body;
@@ -33,7 +40,7 @@ export async function onRequestPost(context: any) {
       success: true, 
       prediction: predictionData 
     }), {
-      headers: { 'Content-Type': 'application/json' }
+      headers: corsHeaders
     });
 
   } catch (error) {
@@ -43,9 +50,20 @@ export async function onRequestPost(context: any) {
       error: 'Prediction failed' 
     }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' }
+      headers: corsHeaders
     });
   }
+}
+
+// Handle OPTIONS requests for CORS
+export async function onRequestOptions() {
+  return new Response(null, {
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type'
+    }
+  });
 }
 
 function generatePriceChart(basePrice: number) {

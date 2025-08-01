@@ -121,19 +121,19 @@ export function ItineraryDisplay({ itinerary, onBookNow }: ItineraryDisplayProps
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="bg-white rounded-lg p-4 text-center border-2 border-primary-600">
                 <div className="text-2xl font-black text-primary-600">
-                  {itinerary.summary.totalActivities}
+                  {itinerary.summary?.totalActivities || 0}
                 </div>
                 <div className="text-sm text-neutral-900 font-bold">Activities</div>
               </div>
               <div className="bg-white rounded-lg p-4 text-center border-2 border-secondary-600">
                 <div className="text-2xl font-black text-secondary-600">
-                  {itinerary.summary.totalMeals}
+                  {itinerary.summary?.totalMeals || 0}
                 </div>
                 <div className="text-sm text-neutral-900 font-bold">Meals</div>
               </div>
               <div className="bg-white rounded-lg p-4 text-center border-2 border-accent-500">
                 <div className="text-2xl font-black text-accent-500">
-                  ₹{Math.round(itinerary.summary.avgDailyCost)}
+                  ₹{Math.round(itinerary.summary?.avgDailyCost || 0)}
                 </div>
                 <div className="text-sm text-neutral-900 font-bold">Avg/Day</div>
               </div>
@@ -151,7 +151,7 @@ export function ItineraryDisplay({ itinerary, onBookNow }: ItineraryDisplayProps
                 Trip Highlights
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                {itinerary.summary.highlights.map((highlight, index) => (
+                {(itinerary.summary?.highlights || []).map((highlight, index) => (
                   <div
                     key={index}
                     className="flex items-center gap-3 p-3 bg-white rounded-lg border-2 border-primary-600"
@@ -195,7 +195,7 @@ export function ItineraryDisplay({ itinerary, onBookNow }: ItineraryDisplayProps
             </div>
 
             {/* Weather Info */}
-            {itinerary.summary.weatherInfo && (
+            {itinerary.summary?.weatherInfo && (
               <div className="bg-blue-50 rounded-lg p-4 border-2 border-blue-200">
                 <h3 className="text-lg font-black text-neutral-900 mb-2">
                   Weather & Packing
@@ -244,7 +244,7 @@ export function ItineraryDisplay({ itinerary, onBookNow }: ItineraryDisplayProps
                 Travel Tips
               </h3>
               <div className="space-y-2">
-                {itinerary.tips.map((tip, index) => (
+                {(itinerary.tips || []).map((tip, index) => (
                   <div key={index} className="flex items-start gap-3 p-3 bg-white rounded-lg border-2 border-neutral-900">
                     <div className="w-6 h-6 bg-primary-600 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
                       <span className="text-xs font-bold text-white">{index + 1}</span>
@@ -478,7 +478,7 @@ function ActivityCard({ activity, getTimeIcon, getCategoryIcon }: ActivityCardPr
         <div className="mt-2 pt-2 border-t-2 border-neutral-900">
           <p className="text-xs font-black text-neutral-900 mb-1">Tips:</p>
           <ul className="text-xs text-neutral-900 space-y-0.5 font-bold">
-            {activity.tips.map((tip, index) => (
+            {(activity.tips || []).map((tip, index) => (
               <li key={index} className="flex items-start gap-1">
                 <span className="text-primary-600 font-black">•</span>
                 {tip}

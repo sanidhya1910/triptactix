@@ -9,6 +9,13 @@ export async function onRequestPost(context: any) {
   const { request, env } = context;
   const { GEMINI_API_KEY } = env as Env;
 
+  const corsHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Content-Type': 'application/json'
+  };
+
   try {
     const body = await request.json();
     
@@ -18,7 +25,7 @@ export async function onRequestPost(context: any) {
         error: 'API key not configured' 
       }), {
         status: 500,
-        headers: { 'Content-Type': 'application/json' }
+        headers: corsHeaders
       });
     }
 
@@ -109,12 +116,12 @@ Focus on Indian destinations and provide costs in Indian Rupees. Include popular
     const text = response.text();
 
     // Try to parse the JSON response
-    let itinerary;
+    let rawItinerary;
     try {
       // Extract JSON from the response (sometimes wrapped in markdown)
       const jsonMatch = text.match(/```json\n([\s\S]*?)\n```/) || text.match(/\{[\s\S]*\}/);
       const jsonString = jsonMatch ? jsonMatch[1] || jsonMatch[0] : text;
-      itinerary = JSON.parse(jsonString);
+      rawItinerary = JSON.parse(jsonString);
     } catch (parseError) {
       console.error('Failed to parse AI response:', parseError);
       return new Response(JSON.stringify({ 
@@ -122,15 +129,52 @@ Focus on Indian destinations and provide costs in Indian Rupees. Include popular
         error: 'Failed to generate itinerary' 
       }), {
         status: 500,
-        headers: { 'Content-Type': 'application/json' }
+        headers: corsHeaders
       });
     }
+
+    // Transform the AI response to match frontend interface
+    const itinerary = {
+      id: `itinerary_${Date.now()}`,
+      destination: rawItinerary.destination || body.destination,
+      startDate: body.startDate,
+      endDate: body.endDate,
+      duration: rawItinerary.duration || rawItinerary.days?.length || 1,
+      totalCost: rawItinerary.totalCost || 0,
+      days: (rawItinerary.days || []).map((day: any) => ({
+        ...day,
+        activities: (day.activities || []).map((activity: any) => ({
+          ...activity,
+          tips: Array.isArray(activity.tips) ? activity.tips : []
+        }))
+      })),
+      summary: {
+        highlights: rawItinerary.tips?.slice(0, 3) || [
+          "Explore local culture and traditions",
+          "Try authentic regional cuisine", 
+          "Visit popular tourist attractions"
+        ],
+        totalActivities: rawItinerary.days?.reduce((sum: number, day: any) => sum + (day.activities?.length || 0), 0) || 0,
+        totalMeals: rawItinerary.days?.reduce((sum: number, day: any) => sum + (day.meals?.length || 0), 0) || 0,
+        avgDailyCost: rawItinerary.totalCost ? Math.round(rawItinerary.totalCost / (rawItinerary.duration || 1)) : 0,
+        weatherInfo: rawItinerary.weather ? {
+          temperature: rawItinerary.weather.temperature || "25-30°C",
+          conditions: rawItinerary.weather.conditions || "Pleasant"
+        } : undefined
+      },
+      tips: Array.isArray(rawItinerary.tips) ? rawItinerary.tips : [],
+      overview: rawItinerary.overview || `Discover the best of ${rawItinerary.destination || body.destination}`,
+      emergencyInfo: rawItinerary.emergencyInfo || {
+        hospitals: ["Local Government Hospital", "Private Medical Center"],
+        emergencyNumbers: ["100 (Police)", "102 (Ambulance)", "101 (Fire)"]
+      }
+    };
 
     return new Response(JSON.stringify({ 
       success: true, 
       itinerary 
     }), {
-      headers: { 'Content-Type': 'application/json' }
+      headers: corsHeaders
     });
 
   } catch (error) {
@@ -140,7 +184,18 @@ Focus on Indian destinations and provide costs in Indian Rupees. Include popular
       error: 'Failed to generate itinerary' 
     }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' }
+      headers: corsHeaders
     });
   }
+}
+
+// Handle OPTIONS requests for CORS
+export async function onRequestOptions() {
+  return new Response(null, {
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type'
+    }
+  });
 }
