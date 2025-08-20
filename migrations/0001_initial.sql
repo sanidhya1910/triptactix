@@ -14,7 +14,7 @@ CREATE TABLE "users" (
 CREATE TABLE "user_preferences" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "userId" TEXT NOT NULL,
-    "currency" TEXT NOT NULL DEFAULT 'USD',
+    "currency" TEXT NOT NULL DEFAULT 'INR',
     "language" TEXT NOT NULL DEFAULT 'en',
     "timezone" TEXT NOT NULL DEFAULT 'UTC',
     "emailNotifications" BOOLEAN NOT NULL DEFAULT true,

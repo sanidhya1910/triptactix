@@ -37,7 +37,7 @@ model User {
 model UserPreferences {
   id        String @id @default(cuid())
   userId    String @unique
-  currency  String @default("USD")
+  currency  String @default("INR")
   language  String @default("en")
   timezone  String @default("UTC")
   

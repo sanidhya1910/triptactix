@@ -130,7 +130,7 @@ export class SkyscannerAPI {
         query: {
           market: 'US',
           locale: 'en-US',
-          currency: 'USD',
+          currency: 'INR',
           queryLegs: [
             {
               originPlace: { queryPlace: params.origin.code },
