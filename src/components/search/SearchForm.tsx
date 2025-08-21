@@ -6,6 +6,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { SearchParams } from '@/types/travel';
 import CityAutocomplete from '@/components/ui/CityAutocomplete';
+import { DateRangePicker, DatePicker } from '@/components/ui/date-picker';
 import { City } from '@/lib/cities';
 import { SparklesIcon, ClockIcon } from '@heroicons/react/24/outline';
 
@@ -28,6 +29,8 @@ export default function SearchForm({ onSearch, loading = false }: SearchFormProp
   const [originCity, setOriginCity] = useState<City | null>(null);
   const [destinationCity, setDestinationCity] = useState<City | null>(null);
   const [useMLPredictions, setUseMLPredictions] = useState(false);
+  const [departureDate, setDepartureDate] = useState<Date | undefined>(undefined);
+  const [returnDate, setReturnDate] = useState<Date | undefined>(undefined);
 
   const {
     register,
@@ -50,6 +53,16 @@ export default function SearchForm({ onSearch, loading = false }: SearchFormProp
       return;
     }
 
+    if (!departureDate) {
+      alert('Please select a departure date');
+      return;
+    }
+
+    if (tripType === 'round-trip' && !returnDate) {
+      alert('Please select a return date for round-trip');
+      return;
+    }
+
     const searchParams: SearchParams = {
       origin: {
         id: '1',
@@ -67,8 +80,8 @@ export default function SearchForm({ onSearch, loading = false }: SearchFormProp
         country: destinationCity.country,
         type: 'airport',
       },
-      departureDate: new Date(data.departureDate),
-      returnDate: data.returnDate ? new Date(data.returnDate) : undefined,
+      departureDate: departureDate!,
+      returnDate: returnDate,
       passengers: {
         adults: data.adults,
         children: data.children,
@@ -168,30 +181,23 @@ export default function SearchForm({ onSearch, loading = false }: SearchFormProp
           </div>
 
           {/* Dates */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {tripType === 'round-trip' ? (
+            <DateRangePicker
+              startDate={departureDate}
+              endDate={returnDate}
+              onStartDateChange={setDepartureDate}
+              onEndDateChange={setReturnDate}
+            />
+          ) : (
             <div className="space-y-2">
               <label className="text-sm font-bold text-black">Departure Date</label>
-              <input
-                {...register('departureDate', { required: 'Departure date is required' })}
-                type="date"
-                className="w-full h-12 rounded-xl border-2 border-neutral-200 focus:border-black bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-200"
+              <DatePicker
+                date={departureDate}
+                onDateChange={setDepartureDate}
+                placeholder="Select departure date"
               />
-              {errors.departureDate && (
-                <span className="text-red-500 text-xs">{errors.departureDate.message}</span>
-              )}
             </div>
-            
-            {tripType === 'round-trip' && (
-              <div className="space-y-2">
-                <label className="text-sm font-bold text-black">Return Date</label>
-                <input
-                  {...register('returnDate')}
-                  type="date"
-                  className="w-full h-12 rounded-xl border-2 border-neutral-200 focus:border-black bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-200"
-                />
-              </div>
-            )}
-          </div>
+          )}
 
           {/* Passengers and Class */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

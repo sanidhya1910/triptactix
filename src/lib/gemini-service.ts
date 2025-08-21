@@ -1,11 +1,679 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { ItineraryRequest, AIItineraryResponse, Itinerary, ItineraryDay } from '@/types/itinerary';
 
-const genAI = new GoogleGenerativeAI('AIzaSyDNSS6NUH1Ie00L4_IANYajnC7Sw_jN99s');
+export interface EnhancedItineraryRequest extends ItineraryRequest {
+  includeFlight: boolean;
+  flightSource?: string;
+  flightBudget?: {
+    outbound: number;
+    return: number;
+  };
+  hotelBudget?: {
+    budget: number;
+    midRange: number;
+    luxury: number;
+  };
+  specificInterests?: string[];
+  groupType?: 'solo' | 'couple' | 'family' | 'friends' | 'business';
+  fitnessLevel?: 'low' | 'moderate' | 'high';
+  dietaryRestrictions?: string[];
+}
+
+export interface GeneratedItinerary {
+  destination: string;
+  duration: number;
+  overview: string;
+  highlights: string[];
+  days: Array<{
+    day: number;
+    date: string;
+    theme: string;
+    activities: Array<{
+      time: string;
+      title: string;
+      description: string;
+      location: string;
+      duration: string;
+      estimatedCost: number;
+      category: 'sightseeing' | 'food' | 'activity' | 'transport' | 'accommodation' | 'shopping';
+      tips: string[];
+    }>;
+    meals: Array<{
+      time: string;
+      restaurant: string;
+      cuisine: string;
+      estimatedCost: number;
+      speciality: string;
+    }>;
+    estimatedDailyCost: number;
+  }>;
+  transportation: {
+    flights?: {
+      outbound: {
+        estimatedCost: number;
+        tips: string[];
+      };
+      return: {
+        estimatedCost: number;
+        tips: string[];
+      };
+    };
+    local: {
+      recommendations: string[];
+      estimatedDailyCost: number;
+    };
+  };
+  accommodation: {
+    type: string;
+    recommendations: Array<{
+      name: string;
+      area: string;
+      estimatedCostPerNight: number;
+      amenities: string[];
+      reason: string;
+    }>;
+  };
+  budgetBreakdown: {
+    flights?: number;
+    accommodation: number;
+    activities: number;
+    food: number;
+    transportation: number;
+    miscellaneous: number;
+    total: number;
+  };
+  tips: {
+    general: string[];
+    budgetSaving: string[];
+    cultural: string[];
+    safety: string[];
+  };
+  bestTimeToVisit: {
+    weather: string;
+    crowds: string;
+    prices: string;
+  };
+}
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'AIzaSyDNSS6NUH1Ie00L4_IANYajnC7Sw_jN99s');
 
 export class GeminiItineraryService {
   private model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  
+  // Rate limiting tracking
+  private static lastRequestTime = 0;
+  private static requestCount = 0;
+  private static readonly MIN_REQUEST_INTERVAL = 60000; // 1 minute between requests
+  private static readonly MAX_REQUESTS_PER_HOUR = 15; // Conservative limit
 
+  async generateEnhancedItinerary(request: EnhancedItineraryRequest): Promise<GeneratedItinerary> {
+    try {
+      // Check rate limiting
+      if (!this.canMakeRequest()) {
+        console.log('Rate limit reached, generating fallback itinerary...');
+        return this.generateFallbackItinerary(request);
+      }
+
+      const prompt = this.buildEnhancedPrompt(request);
+      console.log('Generating enhanced itinerary with Gemini...');
+      
+      // Update rate limiting counters
+      this.updateRequestCounters();
+      
+      const result = await this.model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text();
+      
+      console.log('Raw Gemini response length:', text.length);
+      
+      // Parse the JSON response
+      const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
+      if (!jsonMatch) {
+        throw new Error('No JSON found in Gemini response');
+      }
+      
+      const jsonString = jsonMatch[1].trim();
+      const itinerary = JSON.parse(jsonString);
+      
+      return this.validateAndProcessEnhancedItinerary(itinerary, request);
+      
+    } catch (error) {
+      console.error('Error generating enhanced itinerary with Gemini:', error);
+      
+      // Check if it's a rate limit error
+      if (this.isRateLimitError(error)) {
+        console.log('Rate limit error detected, generating fallback itinerary...');
+        return this.generateFallbackItinerary(request);
+      }
+      
+      // For other errors, also provide fallback
+      console.log('Gemini error occurred, generating fallback itinerary...');
+      return this.generateFallbackItinerary(request);
+    }
+  }
+
+  private canMakeRequest(): boolean {
+    const now = Date.now();
+    const timeSinceLastRequest = now - GeminiItineraryService.lastRequestTime;
+    
+    // Reset hourly counter if an hour has passed
+    if (timeSinceLastRequest > 3600000) { // 1 hour
+      GeminiItineraryService.requestCount = 0;
+    }
+    
+    // Check if we've exceeded limits
+    if (GeminiItineraryService.requestCount >= GeminiItineraryService.MAX_REQUESTS_PER_HOUR) {
+      return false;
+    }
+    
+    if (timeSinceLastRequest < GeminiItineraryService.MIN_REQUEST_INTERVAL) {
+      return false;
+    }
+    
+    return true;
+  }
+  
+  private updateRequestCounters(): void {
+    GeminiItineraryService.lastRequestTime = Date.now();
+    GeminiItineraryService.requestCount += 1;
+  }
+  
+  private isRateLimitError(error: any): boolean {
+    return error?.message?.includes('429') || 
+           error?.message?.includes('Too Many Requests') ||
+           error?.message?.includes('Quota exceeded') ||
+           error?.message?.includes('RATE_LIMIT_EXCEEDED');
+  }
+  
+  private generateFallbackItinerary(request: EnhancedItineraryRequest): GeneratedItinerary {
+    console.log('Generating fallback itinerary with template...');
+    
+    const days = this.calculateTripDays(request.startDate, request.endDate);
+    const dailyBudget = this.calculateDailyBudget(request.budget || 'mid-range', days);
+    const totalBudget = dailyBudget * days;
+    
+    return {
+      destination: request.destination,
+      duration: days,
+      overview: `A ${days}-day ${request.travelStyle || 'cultural'} trip to ${request.destination} designed for ${request.travelers} travelers. This itinerary offers a perfect blend of sightseeing, cultural experiences, and relaxation within your ${request.budget || 'mid-range'} budget.`,
+      highlights: [
+        `Experience the best of ${request.destination}`,
+        `Authentic local cuisine and cultural immersion`,
+        `Comfortable ${request.accommodationType || 'hotel'} accommodation`,
+        `Flexible itinerary suitable for ${request.groupType || 'travelers'}`
+      ],
+      days: this.generateFallbackDays(request, days, dailyBudget),
+      transportation: this.generateFallbackTransportationInfo(request, totalBudget),
+      accommodation: this.generateFallbackAccommodationInfo(request, days),
+      budgetBreakdown: this.generateBudgetBreakdown(request, totalBudget, days),
+      tips: {
+        general: [
+          `Best time to visit ${request.destination} varies by season`,
+          `Book accommodations and flights in advance for better rates`,
+          `Learn basic local phrases to enhance your experience`,
+          `Keep digital and physical copies of important documents`
+        ],
+        budgetSaving: [
+          'Use public transportation when possible',
+          'Eat at local restaurants rather than tourist spots',
+          'Look for free walking tours and activities',
+          'Book combo tickets for multiple attractions'
+        ],
+        cultural: [
+          'Respect local customs and dress codes',
+          'Try traditional foods and local specialties',
+          'Visit during local festivals for authentic experiences',
+          'Engage with locals to learn about their culture'
+        ],
+        safety: [
+          'Register with your embassy if traveling internationally',
+          'Keep emergency contacts readily available',
+          'Stay aware of your surroundings in crowded areas',
+          'Consider travel insurance for peace of mind'
+        ]
+      },
+      bestTimeToVisit: {
+        weather: 'Check seasonal weather patterns for optimal travel conditions',
+        crowds: 'Consider shoulder seasons for fewer crowds and better prices',
+        prices: 'Monitor flight and accommodation prices for the best deals'
+      }
+    };
+  }
+  
+  private generateFallbackDays(request: EnhancedItineraryRequest, days: number, dailyBudget: number) {
+    const dayPlans = [];
+    
+    for (let day = 1; day <= days; day++) {
+      const date = this.addDays(new Date(request.startDate), day - 1);
+      dayPlans.push({
+        day,
+        date: date.toISOString().split('T')[0],
+        theme: this.getDayTheme(day, request.travelStyle || 'cultural'),
+        activities: [
+          {
+            time: '09:00',
+            title: `Morning Exploration in ${request.destination}`,
+            description: `Start your day exploring the main attractions and landmarks of ${request.destination}.`,
+            location: `Central ${request.destination}`,
+            duration: '3 hours',
+            estimatedCost: Math.round(dailyBudget * 0.25),
+            category: 'sightseeing' as const,
+            tips: ['Arrive early to avoid crowds', 'Bring comfortable walking shoes', 'Don\'t forget your camera']
+          },
+          {
+            time: '14:00',
+            title: 'Cultural Experience',
+            description: 'Immerse yourself in local culture through museums, markets, or cultural sites.',
+            location: `Cultural district, ${request.destination}`,
+            duration: '4 hours',
+            estimatedCost: Math.round(dailyBudget * 0.3),
+            category: 'activity' as const,
+            tips: ['Check for guided tours', 'Respect photography rules', 'Engage with local guides']
+          },
+          {
+            time: '19:00',
+            title: 'Evening Leisure',
+            description: 'Enjoy the evening atmosphere with local entertainment or relaxation.',
+            location: `Entertainment area, ${request.destination}`,
+            duration: '2 hours',
+            estimatedCost: Math.round(dailyBudget * 0.2),
+            category: 'activity' as const,
+            tips: ['Perfect time for sunset photos', 'Try local evening snacks', 'Check local event calendars']
+          }
+        ],
+        meals: [
+          {
+            time: '08:00',
+            restaurant: 'Local Breakfast Spot',
+            cuisine: 'Local',
+            estimatedCost: Math.round(dailyBudget * 0.1),
+            speciality: 'Traditional breakfast items'
+          },
+          {
+            time: '13:00',
+            restaurant: 'Authentic Local Restaurant',
+            cuisine: 'Local',
+            estimatedCost: Math.round(dailyBudget * 0.15),
+            speciality: 'Regional specialties'
+          },
+          {
+            time: '20:00',
+            restaurant: 'Recommended Dinner Venue',
+            cuisine: 'Local',
+            estimatedCost: Math.round(dailyBudget * 0.25),
+            speciality: 'Chef\'s signature dishes'
+          }
+        ],
+        estimatedDailyCost: dailyBudget
+      });
+    }
+    
+    return dayPlans;
+  }
+  
+  private generateFallbackTransportationInfo(request: EnhancedItineraryRequest, totalBudget: number) {
+    const result: any = {
+      local: {
+        recommendations: [
+          'Use official taxi services or reputable ride-sharing apps',
+          'Consider daily/weekly public transport passes for savings',
+          'Walk when possible to experience the city authentically',
+          'Rent bikes if the destination is bike-friendly'
+        ],
+        estimatedDailyCost: Math.round(totalBudget * 0.1 / this.calculateTripDays(request.startDate, request.endDate))
+      }
+    };
+    
+    if (request.includeFlight) {
+      const flightCost = request.flightBudget ? 
+        (request.flightBudget.outbound + request.flightBudget.return) :
+        this.estimateFlightCost(request);
+        
+      result.flights = {
+        outbound: {
+          estimatedCost: Math.round(flightCost * 0.5),
+          tips: [
+            'Book in advance for better rates',
+            'Check baggage allowances',
+            'Arrive at airport 2-3 hours early for international flights'
+          ]
+        },
+        return: {
+          estimatedCost: Math.round(flightCost * 0.5),
+          tips: [
+            'Confirm return flight 24 hours before departure',
+            'Check visa/passport validity',
+            'Leave time for airport shopping'
+          ]
+        }
+      };
+    }
+    
+    return result;
+  }
+  
+  private generateFallbackAccommodationInfo(request: EnhancedItineraryRequest, days: number) {
+    const accommodationType = request.accommodationType || 'hotel';
+    const budgetType = request.budget || 'mid-range';
+    const costPerNight = this.getBaseCostForAccommodation(budgetType, accommodationType);
+    
+    return {
+      type: accommodationType,
+      recommendations: [
+        {
+          name: `Recommended ${accommodationType.charAt(0).toUpperCase() + accommodationType.slice(1)}`,
+          area: `Central ${request.destination}`,
+          estimatedCostPerNight: costPerNight,
+          amenities: this.getAmenitiesForType(accommodationType, budgetType),
+          reason: `Perfect for ${request.groupType || 'travelers'} seeking ${budgetType} accommodation with good location and amenities`
+        }
+      ]
+    };
+  }
+  
+  private generateBudgetBreakdown(request: EnhancedItineraryRequest, totalBudget: number, days: number) {
+    const accommodation = Math.round(totalBudget * 0.35);
+    const food = Math.round(totalBudget * 0.25);
+    const activities = Math.round(totalBudget * 0.2);
+    const transportation = Math.round(totalBudget * 0.1);
+    const miscellaneous = Math.round(totalBudget * 0.1);
+    const flights = request.includeFlight ? 
+      (request.flightBudget ? (request.flightBudget.outbound + request.flightBudget.return) : this.estimateFlightCost(request)) : 
+      0;
+    
+    const result: any = {
+      accommodation,
+      activities,
+      food,
+      transportation,
+      miscellaneous,
+      total: totalBudget + flights
+    };
+    
+    if (flights > 0) {
+      result.flights = flights;
+    }
+    
+    return result;
+  }
+  
+  private getDayTheme(day: number, style: string): string {
+    const themes = {
+      cultural: ['Cultural Exploration', 'Historical Sites', 'Art & Museums', 'Local Heritage'],
+      adventure: ['Adventure Activities', 'Outdoor Exploration', 'Nature & Wildlife', 'Sports & Recreation'],
+      relaxed: ['Leisure & Relaxation', 'Scenic Views', 'Wellness Activities', 'Gentle Exploration'],
+      family: ['Family Fun', 'Kid-Friendly Activities', 'Educational Experiences', 'Entertainment'],
+      business: ['Business Meetings', 'Networking', 'Professional Tours', 'Corporate Activities']
+    };
+    
+    const styleThemes = themes[style as keyof typeof themes] || themes.cultural;
+    return styleThemes[(day - 1) % styleThemes.length];
+  }
+  
+  private calculateTripDays(startDate: string, endDate: string): number {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const diffTime = Math.abs(end.getTime() - start.getTime());
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  }
+  
+  private calculateDailyBudget(budgetType: string, days: number): number {
+    const totalBudget = this.calculateTotalBudget(budgetType, days);
+    return Math.round(totalBudget / days);
+  }
+  
+  private calculateTotalBudget(budgetType: string, days: number): number {
+    const baseBudgets = {
+      budget: 3000,
+      'mid-range': 6000,
+      luxury: 12000
+    };
+    
+    return (baseBudgets[budgetType as keyof typeof baseBudgets] || baseBudgets['mid-range']) * days;
+  }
+  
+  private getBaseCostForAccommodation(budget: string, type: string): number {
+    const costs = {
+      budget: { hostel: 800, hotel: 1500, apartment: 1200, resort: 2000 },
+      'mid-range': { hostel: 1500, hotel: 3000, apartment: 2500, resort: 4000 },
+      luxury: { hostel: 2500, hotel: 6000, apartment: 5000, resort: 8000 }
+    };
+    
+    return costs[budget as keyof typeof costs]?.[type as keyof typeof costs.budget] || 2500;
+  }
+  
+  private getAmenitiesForType(type: string, budget: string): string[] {
+    const baseAmenities = {
+      hotel: ['WiFi', 'Room Service', 'Concierge'],
+      hostel: ['WiFi', 'Shared Kitchen', 'Common Areas'],
+      apartment: ['WiFi', 'Kitchen', 'Living Space'],
+      resort: ['WiFi', 'Pool', 'Restaurant', 'Spa Access']
+    };
+    
+    const luxuryExtras = ['Premium Location', 'Premium Amenities', '24/7 Service'];
+    const amenities = baseAmenities[type as keyof typeof baseAmenities] || baseAmenities.hotel;
+    
+    return budget === 'luxury' ? [...amenities, ...luxuryExtras] : amenities;
+  }
+  
+  private estimateFlightCost(request: EnhancedItineraryRequest): number {
+    // Basic flight cost estimation
+    return request.budget === 'luxury' ? 25000 : request.budget === 'mid-range' ? 15000 : 8000;
+  }
+  
+  private addDays(date: Date, days: number): Date {
+    const result = new Date(date);
+    result.setDate(result.getDate() + days);
+    return result;
+  }
+
+  private buildEnhancedPrompt(request: EnhancedItineraryRequest): string {
+    const duration = Math.ceil((new Date(request.endDate).getTime() - new Date(request.startDate).getTime()) / (1000 * 60 * 60 * 24));
+    
+    return `You are an expert travel planner with deep knowledge of ${request.destination}. Create a detailed, personalized itinerary based on the following requirements:
+
+TRIP DETAILS:
+- Destination: ${request.destination}
+- Duration: ${duration} days (${request.startDate} to ${request.endDate})
+- Travelers: ${request.travelers} people
+- Budget Level: ${request.budget}
+- Interests: ${request.interests?.join(', ')}
+- Travel Style: ${request.travelStyle || 'balanced'}
+- Accommodation Type: ${request.accommodationType || 'hotel'}
+- Group Type: ${request.groupType || 'friends'}
+- Fitness Level: ${request.fitnessLevel || 'moderate'}
+${request.dietaryRestrictions ? `- Dietary Restrictions: ${request.dietaryRestrictions.join(', ')}` : ''}
+
+FLIGHT & BUDGET INFORMATION:
+- Include Flights: ${request.includeFlight ? `Yes, from ${request.flightSource}` : 'No'}
+${request.flightBudget ? `- Flight Budget: Outbound ₹${request.flightBudget.outbound}, Return ₹${request.flightBudget.return}` : ''}
+${request.hotelBudget ? `- Hotel Budget Range: Budget ₹${request.hotelBudget.budget}, Mid-range ₹${request.hotelBudget.midRange}, Luxury ₹${request.hotelBudget.luxury} per night` : ''}
+
+Please generate a comprehensive itinerary in JSON format. Make sure all prices are in Indian Rupees (₹) and are realistic for ${request.destination}:
+
+\`\`\`json
+{
+  "destination": "${request.destination}",
+  "duration": ${duration},
+  "overview": "2-3 sentence compelling overview of the trip highlighting unique experiences",
+  "highlights": ["Top 4-5 unique highlights of this itinerary that make it special"],
+  "days": [
+    ${Array.from({ length: duration }, (_, i) => {
+      const dayDate = new Date(request.startDate);
+      dayDate.setDate(dayDate.getDate() + i);
+      return `{
+      "day": ${i + 1},
+      "date": "${dayDate.toISOString().split('T')[0]}",
+      "theme": "${i === 0 ? 'Arrival & First Impressions' : i === duration - 1 ? 'Final Experiences & Departure' : 'Exploration & Discovery'}",
+      "activities": [
+        {
+          "time": "09:00",
+          "title": "Specific Activity Name",
+          "description": "Detailed description with why it's special",
+          "location": "Exact location with area/district",
+          "duration": "2 hours",
+          "estimatedCost": ${request.budget === 'luxury' ? '1200' : request.budget === 'mid-range' ? '800' : '400'},
+          "category": "sightseeing",
+          "tips": ["Practical tip 1", "Insider tip 2", "Best photo spot tip"]
+        },
+        {
+          "time": "14:00",
+          "title": "Another Activity",
+          "description": "Another engaging activity description",
+          "location": "Different area of ${request.destination}",
+          "duration": "3 hours",
+          "estimatedCost": ${request.budget === 'luxury' ? '1500' : request.budget === 'mid-range' ? '1000' : '500'},
+          "category": "activity",
+          "tips": ["What to expect", "When to go", "What to bring"]
+        }
+      ],
+      "meals": [
+        {
+          "time": "12:30",
+          "restaurant": "Specific Restaurant Name",
+          "cuisine": "Local/Regional cuisine type",
+          "estimatedCost": ${request.budget === 'luxury' ? '1200' : request.budget === 'mid-range' ? '800' : '400'},
+          "speciality": "Must-try signature dish"
+        },
+        {
+          "time": "19:30",
+          "restaurant": "Evening Restaurant Name",
+          "cuisine": "Different cuisine type",
+          "estimatedCost": ${request.budget === 'luxury' ? '1800' : request.budget === 'mid-range' ? '1200' : '600'},
+          "speciality": "Local specialty or unique dish"
+        }
+      ],
+      "estimatedDailyCost": ${request.budget === 'luxury' ? '8000' : request.budget === 'mid-range' ? '5000' : '3000'}
+    }`;
+    }).join(',\n    ')}
+  ],
+  "transportation": {
+    ${request.includeFlight ? `
+    "flights": {
+      "outbound": {
+        "estimatedCost": ${request.flightBudget?.outbound || 8000},
+        "tips": ["Book 2-3 weeks in advance for best prices", "Early morning flights are often cheaper", "Check for connecting flights to save money"]
+      },
+      "return": {
+        "estimatedCost": ${request.flightBudget?.return || 7000},
+        "tips": ["Evening flights have better availability", "Consider flexible dates for savings", "Book return with outbound for package deals"]
+      }
+    },` : ''}
+    "local": {
+      "recommendations": ["Best local transport options for ${request.destination}", "Apps to use for bookings", "Average costs and routes"],
+      "estimatedDailyCost": ${request.budget === 'luxury' ? '800' : request.budget === 'mid-range' ? '500' : '300'}
+    }
+  },
+  "accommodation": {
+    "type": "${request.accommodationType || 'hotel'}",
+    "recommendations": [
+      {
+        "name": "Specific Hotel/Place Name 1",
+        "area": "Best area in ${request.destination}",
+        "estimatedCostPerNight": ${request.hotelBudget ? request.hotelBudget[request.budget.replace('-', '') as keyof typeof request.hotelBudget] || 3500 : 3500},
+        "amenities": ["WiFi", "Breakfast", "Pool", "Spa", "Gym"],
+        "reason": "Why this is perfect for your ${request.travelStyle} trip style"
+      },
+      {
+        "name": "Alternative Option 2",
+        "area": "Different great area",
+        "estimatedCostPerNight": ${request.hotelBudget ? request.hotelBudget[request.budget.replace('-', '') as keyof typeof request.hotelBudget] * 0.8 || 2800 : 2800},
+        "amenities": ["WiFi", "Restaurant", "24/7 Service"],
+        "reason": "Budget-friendly alternative with good location"
+      }
+    ]
+  },
+  "budgetBreakdown": {
+    ${request.includeFlight ? `"flights": ${(request.flightBudget?.outbound || 8000) + (request.flightBudget?.return || 7000)},` : ''}
+    "accommodation": ${(request.hotelBudget ? request.hotelBudget[request.budget.replace('-', '') as keyof typeof request.hotelBudget] || 3500 : 3500) * duration},
+    "activities": ${duration * (request.budget === 'luxury' ? 3000 : request.budget === 'mid-range' ? 2000 : 1200)},
+    "food": ${duration * (request.budget === 'luxury' ? 2500 : request.budget === 'mid-range' ? 1800 : 1000)},
+    "transportation": ${duration * (request.budget === 'luxury' ? 800 : request.budget === 'mid-range' ? 500 : 300)},
+    "miscellaneous": ${duration * (request.budget === 'luxury' ? 1500 : request.budget === 'mid-range' ? 1000 : 500)},
+    "total": 0
+  },
+  "tips": {
+    "general": [
+      "Essential travel tips specific to ${request.destination}",
+      "Best time of day to visit popular attractions",
+      "Cultural etiquette and customs to respect",
+      "What to pack for the ${duration}-day trip"
+    ],
+    "budgetSaving": [
+      "How to save money on ${request.destination} attractions",
+      "Best places for affordable meals",
+      "Free activities and experiences",
+      "Transportation savings tips"
+    ],
+    "cultural": [
+      "Important cultural norms in ${request.destination}",
+      "Local customs and traditions to be aware of",
+      "Appropriate dress codes for religious sites",
+      "Common phrases in local language"
+    ],
+    "safety": [
+      "Safety precautions specific to ${request.destination}",
+      "Areas to avoid, especially at night",
+      "Emergency contacts and helpful numbers",
+      "Health and medical considerations"
+    ]
+  },
+  "bestTimeToVisit": {
+    "weather": "Detailed weather information for your travel dates",
+    "crowds": "Expected tourist crowd levels during this period",
+    "prices": "How pricing typically varies during this season"
+  }
+}
+\`\`\`
+
+IMPORTANT GUIDELINES:
+1. Make all activities authentic and specific to ${request.destination}
+2. Include realistic costs in Indian Rupees (₹) for ${request.travelers} travelers
+3. Balance the ${request.budget} budget level across all recommendations
+4. Incorporate ${request.interests?.join(', ')} interests throughout the itinerary
+5. Design for ${request.groupType || 'friends'} group dynamic
+6. Consider ${request.fitnessLevel || 'moderate'} fitness level for activity intensity
+7. Include hidden gems and local insider experiences
+8. Provide actionable, practical tips
+9. Calculate accurate budget breakdown
+10. Make each day flow logically with proper timing
+${request.dietaryRestrictions ? `11. Consider dietary restrictions: ${request.dietaryRestrictions.join(', ')}` : ''}
+
+Generate ONLY the JSON response without any additional text.`;
+  }
+
+  private validateAndProcessEnhancedItinerary(itinerary: any, request: EnhancedItineraryRequest): GeneratedItinerary {
+    // Ensure required fields exist
+    if (!itinerary.destination || !itinerary.days || !Array.isArray(itinerary.days)) {
+      throw new Error('Invalid itinerary format from Gemini');
+    }
+
+    // Calculate total budget if not provided
+    if (itinerary.budgetBreakdown && !itinerary.budgetBreakdown.total) {
+      const breakdown = itinerary.budgetBreakdown;
+      itinerary.budgetBreakdown.total = 
+        (breakdown.flights || 0) +
+        (breakdown.accommodation || 0) +
+        (breakdown.activities || 0) +
+        (breakdown.food || 0) +
+        (breakdown.transportation || 0) +
+        (breakdown.miscellaneous || 0);
+    }
+
+    // Ensure each day has required fields
+    itinerary.days = itinerary.days.map((day: any, index: number) => ({
+      day: day.day || index + 1,
+      date: day.date || new Date(new Date(request.startDate).getTime() + index * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      theme: day.theme || 'Exploration',
+      activities: day.activities || [],
+      meals: day.meals || [],
+      estimatedDailyCost: day.estimatedDailyCost || 3000
+    }));
+
+    return itinerary as GeneratedItinerary;
+  }
+
+  // Original methods for backward compatibility
   async generateItinerary(request: ItineraryRequest): Promise<AIItineraryResponse> {
     try {
       const prompt = this.buildPrompt(request);

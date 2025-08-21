@@ -95,7 +95,7 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-neutral-50">
       {/* Navigation */}
-      <nav className="bg-white border-b border-neutral-200">
+      <nav className="fixed top-0 left-0 right-0 z-50 bg-white/40 supports-[backdrop-filter]:bg-white/25 backdrop-blur-xl border-b border-white/20 shadow-lg shadow-black/5">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <a href="/" className="text-2xl font-bold text-black">
@@ -112,6 +112,9 @@ export default function DashboardPage() {
               <a href="/itinerary" className="text-neutral-600 hover:text-black transition-colors">
                 AI Planner
               </a>
+              <a href="/ml-dashboard" className="text-neutral-600 hover:text-black transition-colors">
+                ML Analytics
+              </a>
               <a href="/dashboard" className="text-black font-semibold">
                 Dashboard
               </a>
@@ -120,7 +123,7 @@ export default function DashboardPage() {
         </div>
       </nav>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pt-24">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>

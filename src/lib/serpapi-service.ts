@@ -45,6 +45,79 @@ export interface FlightOffer {
   };
 }
 
+export interface HotelOffer {
+  id: string;
+  name: string;
+  description: string;
+  type: string;
+  link: string;
+  logo?: string;
+  sponsored: boolean;
+  ecocertified?: boolean;
+  coordinates?: {
+    latitude: number;
+    longitude: number;
+  };
+  checkInTime?: string;
+  checkOutTime?: string;
+  ratePerNight: {
+    lowest: string;
+    extractedLowest: number;
+    beforeTaxesFees?: string;
+    extractedBeforeTaxesFees?: number;
+  };
+  totalRate: {
+    lowest: string;
+    extractedLowest: number;
+    beforeTaxesFees?: string;
+    extractedBeforeTaxesFees?: number;
+  };
+  prices: Array<{
+    source: string;
+    logo?: string;
+    ratePerNight: {
+      lowest: string;
+      extractedLowest: number;
+      beforeTaxesFees?: string;
+      extractedBeforeTaxesFees?: number;
+    };
+  }>;
+  nearbyPlaces?: Array<{
+    name: string;
+    transportations: Array<{
+      type: string;
+      duration: string;
+    }>;
+  }>;
+  hotelClass?: string;
+  extractedHotelClass?: number;
+  images: Array<{
+    thumbnail: string;
+    originalImage: string;
+  }>;
+  overallRating?: number;
+  reviews?: number;
+  ratings?: Array<{
+    stars: number;
+    count: number;
+  }>;
+  locationRating?: number;
+  amenities: string[];
+  excludedAmenities?: string[];
+  healthAndSafety?: {
+    groups: Array<{
+      title: string;
+      list: Array<{
+        title: string;
+        available: boolean;
+      }>;
+    }>;
+    detailsLink?: string;
+  };
+  essentialInfo?: string[];
+  propertyToken?: string;
+}
+
 export interface SerpAPISearchParams {
   origin: string;
   destination: string;
@@ -53,6 +126,16 @@ export interface SerpAPISearchParams {
   adults: number;
   children?: number;
   currency?: string;
+}
+
+export interface HotelSearchParams {
+  destination: string;
+  checkInDate: string;
+  checkOutDate: string;
+  adults: number;
+  children?: number;
+  currency?: string;
+  sortBy?: 'price' | 'rating' | 'reviews';
 }
 
 export class SerpAPIService {
@@ -70,7 +153,7 @@ export class SerpAPIService {
     }
 
     try {
-      console.log('SerpAPI search params:', params);
+      console.log('SerpAPI flight search params:', params);
 
       const searchParams = {
         engine: 'google_flights',
@@ -88,31 +171,162 @@ export class SerpAPIService {
         api_key: this.API_KEY
       };
 
-      console.log('SerpAPI request params:', searchParams);
+      console.log('SerpAPI flight request params:', searchParams);
 
       return new Promise((resolve, reject) => {
         getJson(searchParams, (json: any) => {
           try {
             if (json.error) {
-              console.error('SerpAPI error:', json.error);
+              console.error('SerpAPI flight error:', json.error);
               reject(new Error(`SerpAPI error: ${json.error}`));
               return;
             }
 
-            console.log('SerpAPI raw response keys:', Object.keys(json));
+            console.log('SerpAPI flight raw response keys:', Object.keys(json));
             
             const flights = this.transformFlightData(json, params.currency || 'USD');
             console.log(`SerpAPI found ${flights.length} flights`);
             resolve(flights);
           } catch (error) {
-            console.error('Error processing SerpAPI response:', error);
+            console.error('Error processing SerpAPI flight response:', error);
             reject(error);
           }
         });
       });
     } catch (error) {
-      console.error('SerpAPI search error:', error);
+      console.error('SerpAPI flight search error:', error);
       throw error;
+    }
+  }
+
+  static async searchHotels(params: HotelSearchParams): Promise<HotelOffer[]> {
+    if (!this.API_KEY) {
+      throw new Error('SERPAPI_KEY environment variable is required');
+    }
+
+    try {
+      console.log('SerpAPI hotel search params:', params);
+
+      const searchParams = {
+        engine: 'google_hotels',
+        q: params.destination,
+        check_in_date: params.checkInDate,
+        check_out_date: params.checkOutDate,
+        adults: params.adults,
+        children: params.children || 0,
+        currency: params.currency || 'INR',
+        hl: 'en',
+        gl: 'in', // India for Indian results
+        api_key: this.API_KEY
+      };
+
+      console.log('SerpAPI hotel request params:', searchParams);
+
+      return new Promise((resolve, reject) => {
+        getJson(searchParams, (json: any) => {
+          try {
+            if (json.error) {
+              console.error('SerpAPI hotel error:', json.error);
+              reject(new Error(`SerpAPI hotel error: ${json.error}`));
+              return;
+            }
+
+            console.log('SerpAPI hotel raw response keys:', Object.keys(json));
+            
+            const hotels = this.transformHotelData(json, params.currency || 'INR');
+            console.log(`SerpAPI found ${hotels.length} hotels`);
+            resolve(hotels);
+          } catch (error) {
+            console.error('Error processing SerpAPI hotel response:', error);
+            reject(error);
+          }
+        });
+      });
+    } catch (error) {
+      console.error('SerpAPI hotel search error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get cheapest round-trip flight price for itinerary planning
+   */
+  static async getCheapestFlightPrice(
+    origin: string, 
+    destination: string, 
+    departureDate: string, 
+    returnDate: string,
+    passengers: number = 1
+  ): Promise<{ price: number; currency: string } | null> {
+    try {
+      const flights = await this.searchFlights({
+        origin,
+        destination,
+        departureDate,
+        returnDate,
+        adults: passengers,
+        currency: 'INR'
+      });
+
+      if (flights.length === 0) return null;
+
+      // Find the cheapest flight
+      const cheapest = flights.reduce((min, flight) => 
+        flight.price.total < min.price.total ? flight : min
+      );
+
+      return {
+        price: cheapest.price.total,
+        currency: cheapest.price.currency
+      };
+    } catch (error) {
+      console.error('Error getting cheapest flight price:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get hotel price range for itinerary planning
+   */
+  static async getHotelPriceRange(
+    destination: string,
+    checkInDate: string,
+    checkOutDate: string,
+    guests: number = 2
+  ): Promise<{ budget: number; midRange: number; luxury: number; currency: string } | null> {
+    try {
+      const hotels = await this.searchHotels({
+        destination,
+        checkInDate,
+        checkOutDate,
+        adults: guests,
+        currency: 'INR'
+      });
+
+      if (hotels.length === 0) return null;
+
+      // Sort hotels by price
+      const sortedByPrice = hotels
+        .filter(h => h.totalRate.extractedLowest > 0)
+        .sort((a, b) => a.totalRate.extractedLowest - b.totalRate.extractedLowest);
+
+      if (sortedByPrice.length === 0) return null;
+
+      // Calculate price segments
+      const prices = sortedByPrice.map(h => h.totalRate.extractedLowest);
+      const budget = prices[Math.floor(prices.length * 0.2)] || prices[0]; // 20th percentile
+      const midRange = prices[Math.floor(prices.length * 0.5)] || prices[0]; // 50th percentile (median)
+      const luxury = prices[Math.floor(prices.length * 0.8)] || prices[prices.length - 1]; // 80th percentile
+
+      return {
+        budget: Math.round(budget),
+        midRange: Math.round(midRange),
+        luxury: Math.round(luxury),
+        currency: 'INR'
+      };
+    } catch (error) {
+      console.error('Error getting hotel price range:', error);
+      return null;
     }
   }
 
@@ -142,6 +356,67 @@ export class SerpAPIService {
     }
 
     return flights;
+  }
+
+  private static transformHotelData(data: any, currency: string): HotelOffer[] {
+    const hotels: HotelOffer[] = [];
+
+    if (data.properties && Array.isArray(data.properties)) {
+      console.log(`Processing ${data.properties.length} hotels from SerpAPI`);
+      
+      for (const hotel of data.properties) {
+        try {
+          const transformedHotel: HotelOffer = {
+            id: hotel.property_token || `hotel_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            name: hotel.name || 'Unknown Hotel',
+            description: hotel.description || '',
+            type: hotel.type || 'hotel',
+            link: hotel.link || '',
+            logo: hotel.logo,
+            sponsored: hotel.sponsored || false,
+            ecocertified: hotel.eco_certified,
+            coordinates: hotel.gps_coordinates ? {
+              latitude: hotel.gps_coordinates.latitude,
+              longitude: hotel.gps_coordinates.longitude
+            } : undefined,
+            checkInTime: hotel.check_in_time,
+            checkOutTime: hotel.check_out_time,
+            ratePerNight: {
+              lowest: hotel.rate_per_night?.lowest || '₹0',
+              extractedLowest: hotel.rate_per_night?.extracted_lowest || 0,
+              beforeTaxesFees: hotel.rate_per_night?.before_taxes_fees,
+              extractedBeforeTaxesFees: hotel.rate_per_night?.extracted_before_taxes_fees
+            },
+            totalRate: {
+              lowest: hotel.total_rate?.lowest || '₹0',
+              extractedLowest: hotel.total_rate?.extracted_lowest || 0,
+              beforeTaxesFees: hotel.total_rate?.before_taxes_fees,
+              extractedBeforeTaxesFees: hotel.total_rate?.extracted_before_taxes_fees
+            },
+            prices: hotel.prices || [],
+            nearbyPlaces: hotel.nearby_places,
+            hotelClass: hotel.hotel_class,
+            extractedHotelClass: hotel.extracted_hotel_class,
+            images: hotel.images || [{ thumbnail: '', originalImage: '' }],
+            overallRating: hotel.overall_rating,
+            reviews: hotel.reviews,
+            ratings: hotel.ratings,
+            locationRating: hotel.location_rating,
+            amenities: hotel.amenities || [],
+            excludedAmenities: hotel.excluded_amenities,
+            healthAndSafety: hotel.health_and_safety,
+            essentialInfo: hotel.essential_info,
+            propertyToken: hotel.property_token
+          };
+
+          hotels.push(transformedHotel);
+        } catch (error) {
+          console.error('Error transforming hotel data:', error);
+        }
+      }
+    }
+
+    return hotels;
   }
 
   private static transformSingleFlight(flightData: any, currency: string, type: string): FlightOffer | null {

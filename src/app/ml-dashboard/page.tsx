@@ -4,6 +4,8 @@ import React, { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { DatePicker } from '@/components/ui/date-picker';
+import { format } from 'date-fns';
 import { PricePredictionCard, RouteAnalyticsCard } from '@/components/charts/MLInsightsCard';
 
 interface DashboardInsights {
@@ -55,10 +57,10 @@ export default function MLDashboard() {
   const [routeAnalytics, setRouteAnalytics] = useState<RouteAnalytics | null>(null);
   const [priceRecommendations, setPriceRecommendations] = useState<PriceRecommendations | null>(null);
   const [loading, setLoading] = useState(false);
+  const [departureDate, setDepartureDate] = useState<Date>(new Date('2025-08-30'));
   const [searchForm, setSearchForm] = useState({
     from: 'New Delhi',
     to: 'Mumbai',
-    departureDate: '2025-08-30',
     airline: ''
   });
 
@@ -79,7 +81,7 @@ export default function MLDashboard() {
   };
 
   const handlePredictionSearch = async () => {
-    if (!searchForm.from || !searchForm.to || !searchForm.departureDate) {
+    if (!searchForm.from || !searchForm.to || !departureDate) {
       return;
     }
 
@@ -88,14 +90,14 @@ export default function MLDashboard() {
       const params = new URLSearchParams({
         from: searchForm.from,
         to: searchForm.to,
-        departureDate: searchForm.departureDate,
+        departureDate: format(departureDate, 'yyyy-MM-dd'),
         ...(searchForm.airline && { airline: searchForm.airline })
       });
 
       const [predictionRes, analyticsRes, recommendationsRes] = await Promise.all([
         fetch(`/api/ml/predictions?${params}`),
-        fetch(`/api/ml/analytics?${params.toString().replace('departureDate=', '').replace(searchForm.departureDate, '').replace('airline=', '').replace(searchForm.airline, '')}`),
-        fetch(`/api/ml/recommendations?${params.toString().replace('departureDate=', '').replace(searchForm.departureDate, '').replace('airline=', '').replace(searchForm.airline, '')}`)
+        fetch(`/api/ml/analytics?${params.toString().replace('departureDate=', '').replace(format(departureDate, 'yyyy-MM-dd'), '').replace('airline=', '').replace(searchForm.airline, '')}`),
+        fetch(`/api/ml/recommendations?${params.toString().replace('departureDate=', '').replace(format(departureDate, 'yyyy-MM-dd'), '').replace('airline=', '').replace(searchForm.airline, '')}`)
       ]);
 
       if (predictionRes.ok) {
@@ -120,7 +122,37 @@ export default function MLDashboard() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto p-6 space-y-6">
+    <div className="min-h-screen bg-neutral-50">
+      {/* Navigation */}
+      <nav className="fixed top-0 left-0 right-0 z-50 bg-white/40 supports-[backdrop-filter]:bg-white/25 backdrop-blur-xl border-b border-white/20 shadow-lg shadow-black/5">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <a href="/" className="text-2xl font-bold text-black">
+              Triptactix
+            </a>
+            
+            <div className="hidden md:flex items-center space-x-8">
+              <a href="/" className="text-neutral-600 hover:text-black transition-colors">
+                Home
+              </a>
+              <a href="/search" className="text-neutral-600 hover:text-black transition-colors">
+                Search
+              </a>
+              <a href="/itinerary" className="text-neutral-600 hover:text-black transition-colors">
+                AI Planner
+              </a>
+              <a href="/ml-dashboard" className="text-black font-semibold">
+                ML Analytics
+              </a>
+              <a href="/dashboard" className="text-neutral-600 hover:text-black transition-colors">
+                Dashboard
+              </a>
+            </div>
+          </div>
+        </div>
+      </nav>
+    
+    <div className="max-w-7xl mx-auto p-6 space-y-6 pt-24">
       <div className="text-center mb-8">
         <h1 className="text-3xl font-bold text-gray-900 mb-2">
           🤖 AI-Powered Flight Analytics
@@ -239,10 +271,10 @@ export default function MLDashboard() {
           
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">Departure Date</label>
-            <Input
-              type="date"
-              value={searchForm.departureDate}
-              onChange={(e) => setSearchForm(prev => ({ ...prev, departureDate: e.target.value }))}
+            <DatePicker
+              date={departureDate}
+              onDateChange={(date) => date && setDepartureDate(date)}
+              placeholder="Select departure date"
               className="w-full"
             />
           </div>
@@ -382,6 +414,7 @@ export default function MLDashboard() {
           </div>
         </div>
       </Card>
+    </div>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ItineraryRequestSchema } from '@/types/itinerary';
-import { geminiItineraryService } from '@/lib/gemini-service';
+import { groqItineraryService } from '@/lib/groq-service';
 
 export async function POST(request: NextRequest) {
   try {
@@ -18,8 +18,8 @@ export async function POST(request: NextRequest) {
 
     const itineraryRequest = validation.data;
     
-    // Generate itinerary using Gemini AI
-    const response = await geminiItineraryService.generateItinerary(itineraryRequest);
+    // Generate itinerary using Groq AI
+    const response = await groqItineraryService.generateItinerary(itineraryRequest);
     
     return NextResponse.json(response);
   } catch (error) {
