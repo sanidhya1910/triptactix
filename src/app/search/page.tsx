@@ -1,268 +1,343 @@
 'use client';
 
-import React, { useState } from 'react';
-import { SearchForm } from '@/components/search/SearchForm';
-import { FlightResults } from '@/components/search/FlightResults';
-import { PricePredictionChart } from '@/components/charts/PricePredictionChart';
-import { SearchParams, SearchResults, Flight, PricePrediction, PriceHistory } from '@/types/travel';
-import { ModernLayout } from '@/components/layout/ModernLayout';
-import { AnimatedSection, FadeInWhenVisible, StaggeredContainer } from '@/components/ui/animations';
-import { ModernCard } from '@/components/ui/modern-card';
-import { ModernBadge, StatusBadge, PriceBadge } from '@/components/ui/modern-badge';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import CityAutocomplete from '@/components/ui/CityAutocomplete';
+import { City } from '@/lib/cities';
 import { 
-  ChartBarIcon,
+  MagnifyingGlassIcon,
   PaperAirplaneIcon,
-  BuildingOffice2Icon,
-  SparklesIcon,
-  MagnifyingGlassIcon
+  MapPinIcon,
+  CalendarDaysIcon,
+  UsersIcon,
+  ArrowRightIcon,
+  StarIcon,
+  ArrowsRightLeftIcon
 } from '@heroicons/react/24/outline';
 
 export default function SearchPage() {
-  const [searchResults, setSearchResults] = useState<SearchResults | null>(null);
-  const [selectedFlight, setSelectedFlight] = useState<Flight | null>(null);
-  const [prediction, setPrediction] = useState<PricePrediction | null>(null);
-  const [priceHistory, setPriceHistory] = useState<PriceHistory[]>([]);
+  const [tripType, setTripType] = useState<'one-way' | 'round-trip'>('round-trip');
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'flights' | 'trains' | 'prediction'>('flights');
+  const [fromCity, setFromCity] = useState('');
+  const [toCity, setToCity] = useState('');
+  const [selectedFromCity, setSelectedFromCity] = useState<City | null>(null);
+  const [selectedToCity, setSelectedToCity] = useState<City | null>(null);
 
-  const handleSearch = async (params: SearchParams) => {
+  const handleFromCityChange = (city: City | null, inputValue: string) => {
+    setSelectedFromCity(city);
+    setFromCity(inputValue);
+  };
+
+  const handleToCityChange = (city: City | null, inputValue: string) => {
+    setSelectedToCity(city);
+    setToCity(inputValue);
+  };
+
+  const handleSwapCities = () => {
+    // Swap the selected cities
+    const tempCity = selectedFromCity;
+    const tempCityString = fromCity;
+    
+    setSelectedFromCity(selectedToCity);
+    setFromCity(toCity);
+    setSelectedToCity(tempCity);
+    setToCity(tempCityString);
+  };
+
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Validate that both cities are selected
+    if (!selectedFromCity || !selectedToCity) {
+      alert('Please select valid cities for both origin and destination');
+      return;
+    }
+    
+    if (selectedFromCity.code === selectedToCity.code) {
+      alert('Origin and destination cannot be the same');
+      return;
+    }
+    
     setLoading(true);
-    try {
-      const response = await fetch('/api/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params),
-      });
-
-      const result = await response.json();
-      
-      if (result.success) {
-        setSearchResults(result.data);
-        setActiveTab('flights');
-        
-        // Get price prediction for flights
-        if (result.data.flights.length > 0) {
-          await fetchPricePrediction(result.data.searchId, params);
-        }
-      } else {
-        console.error('Search failed:', result.error);
-        // Handle error - show toast or error message
-      }
-    } catch (error) {
-      console.error('Search error:', error);
-      // Handle error
-    } finally {
+    
+    // Simulate API call with actual city data
+    console.log('Searching flights from:', selectedFromCity, 'to:', selectedToCity);
+    setTimeout(() => {
       setLoading(false);
-    }
-  };
-
-  const fetchPricePrediction = async (searchId: string, params: SearchParams) => {
-    try {
-      const response = await fetch('/api/predictions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          searchId,
-          origin: params.origin.code,
-          destination: params.destination.code,
-          departureDate: params.departureDate.toISOString(),
-          returnDate: params.returnDate?.toISOString(),
-          travelType: 'flight',
-        }),
-      });
-
-      const result = await response.json();
-      
-      if (result.success) {
-        setPrediction(result.data.prediction);
-        setPriceHistory(result.data.priceHistory);
-      }
-    } catch (error) {
-      console.error('Prediction error:', error);
-    }
-  };
-
-  const handleSelectFlight = (flight: Flight) => {
-    setSelectedFlight(flight);
-    // In a real app, you might navigate to booking page or show booking form
-    console.log('Selected flight:', flight);
-  };
-
-  const handleCreatePriceAlert = (targetPrice: number) => {
-    // In a real app, create price alert
-    console.log('Create price alert for:', targetPrice);
-  };
-
-  const renderTabContent = () => {
-    if (!searchResults) return null;
-
-    switch (activeTab) {
-      case 'flights':
-        return (
-          <FadeInWhenVisible>
-            <FlightResults
-              flights={searchResults.flights}
-              loading={loading}
-              onSelectFlight={handleSelectFlight}
-            />
-          </FadeInWhenVisible>
-        );
-      case 'trains':
-        return (
-          <FadeInWhenVisible>
-            <StaggeredContainer className="space-y-4">
-              {searchResults.trains.length > 0 ? (
-                searchResults.trains.map((train) => (
-                  <ModernCard key={train.id} hover glowOnHover>
-                    <div className="p-6">
-                      <div className="flex items-center justify-between mb-4">
-                        <div>
-                          <h3 className="font-semibold text-lg">{train.operator}</h3>
-                          <p className="text-blue-600 font-medium">{train.outbound[0].trainName}</p>
-                        </div>
-                        <PriceBadge amount={train.price.total} highlight />
-                      </div>
-                      
-                      <div className="flex items-center space-x-4 text-sm text-neutral-600">
-                        <span>{train.outbound[0].class}</span>
-                        <ModernBadge variant="info">{train.amenities.join(', ')}</ModernBadge>
-                      </div>
-                    </div>
-                  </ModernCard>
-                ))
-              ) : (
-                <ModernCard>
-                  <div className="p-8 text-center">
-                    <BuildingOffice2Icon className="w-16 h-16 text-neutral-400 mx-auto mb-4" />
-                    <p className="text-lg font-medium text-neutral-600">No trains found for your search criteria.</p>
-                  </div>
-                </ModernCard>
-              )}
-            </StaggeredContainer>
-          </FadeInWhenVisible>
-        );
-      case 'prediction':
-        return prediction && priceHistory.length > 0 ? (
-          <FadeInWhenVisible>
-            <PricePredictionChart
-              prediction={prediction}
-              priceHistory={priceHistory}
-              onCreateAlert={handleCreatePriceAlert}
-            />
-          </FadeInWhenVisible>
-        ) : (
-          <ModernCard>
-            <div className="p-8 text-center">
-              <ChartBarIcon className="w-16 h-16 text-neutral-400 mx-auto mb-4" />
-              <p className="text-lg font-medium text-neutral-600">Price prediction data not available.</p>
-            </div>
-          </ModernCard>
-        );
-      default:
-        return null;
-    }
+    }, 2000);
   };
 
   return (
-    <ModernLayout>
-      <div className="container mx-auto px-4 py-8">
-        {/* Hero Section */}
-        <AnimatedSection className="text-center mb-12">
-          <div className="flex items-center justify-center mb-4">
-            <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl flex items-center justify-center mr-4">
-              <MagnifyingGlassIcon className="w-6 h-6 text-white" />
+    <div className="min-h-screen bg-neutral-50">
+      {/* Navigation */}
+      <nav className="bg-white border-b border-neutral-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <a href="/" className="text-2xl font-bold text-black">
+              Triptactix
+            </a>
+            
+            <div className="hidden md:flex items-center space-x-8">
+              <a href="/" className="text-neutral-600 hover:text-black transition-colors">
+                Home
+              </a>
+              <a href="/search" className="text-black font-semibold">
+                Search
+              </a>
+              <a href="/itinerary" className="text-neutral-600 hover:text-black transition-colors">
+                AI Planner
+              </a>
+              <a href="/dashboard" className="text-neutral-600 hover:text-black transition-colors">
+                Dashboard
+              </a>
             </div>
-            <h1 className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-blue-600 to-blue-800 bg-clip-text text-transparent">
-              Search & Compare
-            </h1>
           </div>
-          <p className="text-lg text-neutral-600 max-w-2xl mx-auto">
-            Find the perfect travel options with AI-powered insights and real-time price predictions
+        </div>
+      </nav>
+
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        {/* Header */}
+        <div className="text-center mb-12">
+          <h1 className="text-4xl font-bold text-black mb-4">
+            Find Your Perfect Flight
+          </h1>
+          <p className="text-xl text-neutral-600 mb-2">
+            Search and compare flights from multiple airlines
           </p>
-        </AnimatedSection>
+          <p className="text-sm text-neutral-500">
+            Start typing city names to see suggestions with airports
+          </p>
+        </div>
 
         {/* Search Form */}
-        <AnimatedSection delay={0.2} className="mb-12">
-          <SearchForm onSearch={handleSearch} loading={loading} />
-        </AnimatedSection>
-
-        {/* Selected Items Summary */}
-        {selectedFlight && (
-          <AnimatedSection delay={0.3} className="mb-8">
-            <ModernCard className="bg-gradient-to-r from-green-50 to-emerald-50 border-green-200">
-              <div className="p-6">
-                <div className="flex items-center space-x-3 mb-4">
-                  <div className="w-8 h-8 bg-green-500 rounded-lg flex items-center justify-center">
-                    <SparklesIcon className="w-4 h-4 text-white" />
-                  </div>
-                  <h3 className="text-lg font-semibold text-green-800">Your Selection</h3>
+        <Card className="mb-12">
+          <CardHeader>
+            <div className="flex justify-center space-x-4">
+              <Button
+                type="button"
+                variant={tripType === 'round-trip' ? 'default' : 'outline'}
+                onClick={() => setTripType('round-trip')}
+                className="min-w-[120px]"
+              >
+                Round Trip
+              </Button>
+              <Button
+                type="button"
+                variant={tripType === 'one-way' ? 'default' : 'outline'}
+                onClick={() => setTripType('one-way')}
+                className="min-w-[120px]"
+              >
+                One Way
+              </Button>
+            </div>
+          </CardHeader>
+          
+          <CardContent>
+            <form onSubmit={handleSearch} className="space-y-6">
+              {/* Origin and Destination */}
+              <div className="relative">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <CityAutocomplete
+                    placeholder="From (City or Airport)"
+                    value={fromCity}
+                    onChange={handleFromCityChange}
+                  />
+                  <CityAutocomplete
+                    placeholder="To (City or Airport)"
+                    value={toCity}
+                    onChange={handleToCityChange}
+                  />
                 </div>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <PaperAirplaneIcon className="w-5 h-5 text-green-600" />
-                    <div>
-                      <p className="font-medium text-green-900">{selectedFlight.airline}</p>
-                      <p className="text-sm text-green-700">
-                        {selectedFlight.outbound[0].origin.code} → {selectedFlight.outbound[0].destination.code}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-4">
-                    <PriceBadge amount={selectedFlight.price.total} highlight />
-                    <Button className="bg-green-600 hover:bg-green-700">
-                      Book Flight
+                
+                {/* Swap Button - Desktop */}
+                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-10 hidden md:block">
+                  <div className="bg-neutral-50 rounded-full p-1 shadow-sm">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleSwapCities}
+                      className="w-12 h-12 rounded-full bg-white border-2 border-neutral-300 hover:border-black hover:bg-neutral-50 transition-all duration-200 shadow-md hover:shadow-lg p-0 flex items-center justify-center"
+                      title="Swap origin and destination"
+                    >
+                      <ArrowsRightLeftIcon className="w-5 h-5 text-neutral-600 hover:text-black transition-colors" />
                     </Button>
                   </div>
                 </div>
+                
+                {/* Mobile Swap Button */}
+                <div className="flex justify-center mt-4 md:hidden">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSwapCities}
+                    className="px-6 py-2 text-sm bg-white border-2 border-neutral-300 hover:border-black hover:bg-neutral-50 transition-colors"
+                    title="Swap origin and destination"
+                  >
+                    <ArrowsRightLeftIcon className="w-4 h-4 mr-2" />
+                    Swap Cities
+                  </Button>
+                </div>
               </div>
-            </ModernCard>
-          </AnimatedSection>
-        )}
 
-        {/* Search Results */}
-        {searchResults && (
-          <AnimatedSection delay={0.4}>
-            <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as any)} className="space-y-8">
-              <TabsList className="grid w-full grid-cols-3 lg:w-auto lg:grid-cols-none lg:flex">
-                <TabsTrigger value="flights" className="flex items-center space-x-2">
-                  <PaperAirplaneIcon className="w-4 h-4" />
-                  <span>Flights</span>
-                  <ModernBadge size="sm">{searchResults.flights.length}</ModernBadge>
-                </TabsTrigger>
-                <TabsTrigger value="trains" className="flex items-center space-x-2">
-                  <BuildingOffice2Icon className="w-4 h-4" />
-                  <span>Trains</span>
-                  <ModernBadge size="sm">{searchResults.trains.length}</ModernBadge>
-                </TabsTrigger>
-                {prediction && (
-                  <TabsTrigger value="prediction" className="flex items-center space-x-2">
-                    <ChartBarIcon className="w-4 h-4" />
-                    <span>AI Prediction</span>
-                    <ModernBadge variant="success" size="sm">AI</ModernBadge>
-                  </TabsTrigger>
+              {/* Dates */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="relative">
+                  <CalendarDaysIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-neutral-400" />
+                  <Input
+                    type="date"
+                    className="pl-10"
+                    required
+                  />
+                </div>
+                {tripType === 'round-trip' && (
+                  <div className="relative">
+                    <CalendarDaysIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-neutral-400" />
+                    <Input
+                      type="date"
+                      className="pl-10"
+                      required
+                    />
+                  </div>
                 )}
-              </TabsList>
+              </div>
 
-              <TabsContent value="flights" className="mt-8">
-                {renderTabContent()}
-              </TabsContent>
-              
-              <TabsContent value="trains" className="mt-8">
-                {renderTabContent()}
-              </TabsContent>
-              
-              {prediction && (
-                <TabsContent value="prediction" className="mt-8">
-                  {renderTabContent()}
-                </TabsContent>
-              )}
-            </Tabs>
-          </AnimatedSection>
+              {/* Passengers and Class */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="relative">
+                  <UsersIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-neutral-400" />
+                  <select className="w-full h-12 pl-10 pr-4 border-2 border-neutral-300 rounded-lg bg-white text-neutral-900 focus:border-black focus:outline-none focus:ring-2 focus:ring-black/10 transition-colors">
+                    <option value="1">1 Adult</option>
+                    <option value="2">2 Adults</option>
+                    <option value="3">3 Adults</option>
+                    <option value="4">4+ Adults</option>
+                  </select>
+                </div>
+                <div>
+                  <select className="w-full h-12 px-4 border-2 border-neutral-300 rounded-lg bg-white text-neutral-900 focus:border-black focus:outline-none focus:ring-2 focus:ring-black/10 transition-colors">
+                    <option value="economy">Economy</option>
+                    <option value="premium">Premium Economy</option>
+                    <option value="business">Business</option>
+                    <option value="first">First Class</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Search Button */}
+              <div className="text-center">
+                <Button
+                  type="submit"
+                  size="lg"
+                  className="px-12 py-4 text-lg"
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <>
+                      <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
+                      Searching...
+                    </>
+                  ) : (
+                    <>
+                      <MagnifyingGlassIcon className="w-5 h-5 mr-2" />
+                      Search Flights
+                    </>
+                  )}
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+
+        {/* Sample Results (shown when not loading) */}
+        {!loading && (
+          <div className="space-y-6">
+            <h2 className="text-2xl font-bold text-black mb-6">Flight Results</h2>
+            
+            {/* Sample Flight Card */}
+            <Card className="hover:shadow-lg transition-shadow">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-12 h-12 bg-neutral-100 rounded-lg flex items-center justify-center">
+                      <PaperAirplaneIcon className="w-6 h-6 text-neutral-600" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-black">Air India Express</div>
+                      <div className="text-neutral-600">AI-234</div>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center space-x-8">
+                    <div className="text-center">
+                      <div className="font-semibold text-black">09:30</div>
+                      <div className="text-sm text-neutral-600">DEL</div>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <div className="w-16 h-0.5 bg-neutral-300"></div>
+                      <div className="text-sm text-neutral-600">2h 30m</div>
+                      <div className="w-16 h-0.5 bg-neutral-300"></div>
+                    </div>
+                    <div className="text-center">
+                      <div className="font-semibold text-black">12:00</div>
+                      <div className="text-sm text-neutral-600">BOM</div>
+                    </div>
+                  </div>
+                  
+                  <div className="text-right">
+                    <div className="text-2xl font-bold text-black">₹4,850</div>
+                    <Button size="sm" className="mt-2">
+                      Select
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Another Sample Flight Card */}
+            <Card className="hover:shadow-lg transition-shadow">
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-12 h-12 bg-neutral-100 rounded-lg flex items-center justify-center">
+                      <PaperAirplaneIcon className="w-6 h-6 text-neutral-600" />
+                    </div>
+                    <div>
+                      <div className="font-semibold text-black">IndiGo</div>
+                      <div className="text-neutral-600">6E-456</div>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center space-x-8">
+                    <div className="text-center">
+                      <div className="font-semibold text-black">14:15</div>
+                      <div className="text-sm text-neutral-600">DEL</div>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <div className="w-16 h-0.5 bg-neutral-300"></div>
+                      <div className="text-sm text-neutral-600">2h 25m</div>
+                      <div className="w-16 h-0.5 bg-neutral-300"></div>
+                    </div>
+                    <div className="text-center">
+                      <div className="font-semibold text-black">16:40</div>
+                      <div className="text-sm text-neutral-600">BOM</div>
+                    </div>
+                  </div>
+                  
+                  <div className="text-right">
+                    <div className="text-2xl font-bold text-black">₹5,200</div>
+                    <Button size="sm" className="mt-2">
+                      Select
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         )}
       </div>
-    </ModernLayout>
+    </div>
   );
 }

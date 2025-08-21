@@ -3,16 +3,16 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center whitespace-nowrap rounded-lg text-sm font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-600 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-transparent',
+  'inline-flex items-center justify-center whitespace-nowrap rounded-lg text-sm font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-transparent',
   {
     variants: {
       variant: {
-        default: 'bg-primary-600 text-white hover:bg-primary-700 shadow-lg hover:shadow-xl border-2 border-primary-600 hover:border-primary-700',
-        destructive: 'bg-accent-500 text-white hover:bg-accent-600 shadow-lg hover:shadow-xl border-2 border-accent-500 hover:border-accent-600',
-        outline: 'border-2 border-neutral-900 bg-white text-neutral-900 hover:bg-neutral-900 hover:text-white font-bold',
-        secondary: 'bg-secondary-600 text-white hover:bg-secondary-700 shadow-lg hover:shadow-xl border-2 border-secondary-600 hover:border-secondary-700',
-        ghost: 'text-neutral-900 hover:bg-neutral-200 hover:text-neutral-900 font-medium',
-        link: 'text-primary-600 underline-offset-4 hover:underline hover:text-primary-700 font-medium',
+        default: 'bg-black text-white hover:bg-neutral-800 shadow-lg hover:shadow-xl border-2 border-black hover:border-neutral-800',
+        destructive: 'bg-destructive text-white hover:bg-destructive/90 shadow-lg hover:shadow-xl border-2 border-destructive hover:border-destructive/90',
+        outline: 'border-2 border-neutral-300 bg-white text-neutral-900 hover:bg-neutral-50 hover:border-neutral-400 font-medium',
+        secondary: 'bg-neutral-700 text-white hover:bg-neutral-600 shadow-lg hover:shadow-xl border-2 border-neutral-700 hover:border-neutral-600',
+        ghost: 'text-neutral-900 hover:bg-neutral-100 hover:text-neutral-900 font-medium',
+        link: 'text-neutral-700 underline-offset-4 hover:underline hover:text-black font-medium',
       },
       size: {
         default: 'h-12 px-6 py-3',

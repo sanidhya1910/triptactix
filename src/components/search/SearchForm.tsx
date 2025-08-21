@@ -83,7 +83,7 @@ export function SearchForm({ onSearch, loading = false }: SearchFormProps) {
   return (
     <Card className="w-full max-w-4xl mx-auto">
       <CardHeader>
-        <CardTitle className="text-center text-2xl font-bold text-blue-900">
+        <CardTitle className="text-center text-2xl font-bold text-neutral-900">
           Find Your Perfect Trip
         </CardTitle>
         <div className="flex justify-center space-x-4 mt-4">
@@ -91,6 +91,11 @@ export function SearchForm({ onSearch, loading = false }: SearchFormProps) {
             type="button"
             variant={tripType === 'round-trip' ? 'default' : 'outline'}
             onClick={() => setTripType('round-trip')}
+            className={`${
+              tripType === 'round-trip'
+                ? 'bg-black text-white hover:bg-neutral-800'
+                : 'bg-white text-black border-neutral-300 hover:bg-neutral-50'
+            }`}
           >
             Round Trip
           </Button>
@@ -98,6 +103,11 @@ export function SearchForm({ onSearch, loading = false }: SearchFormProps) {
             type="button"
             variant={tripType === 'one-way' ? 'default' : 'outline'}
             onClick={() => setTripType('one-way')}
+            className={`${
+              tripType === 'one-way'
+                ? 'bg-black text-white hover:bg-neutral-800'
+                : 'bg-white text-black border-neutral-300 hover:bg-neutral-50'
+            }`}
           >
             One Way
           </Button>
