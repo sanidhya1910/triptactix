@@ -54,3 +54,5 @@ python-ml-api/*.pkl
 
 # Other directories
 /swaarg
+
+/models

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { SearchParams, SearchResults, Flight, Train } from '@/types/travel';
 import RapidAPIService from '@/lib/rapidapi';
+import RealtimeFlightService from '@/lib/realtime-flights';
 import { FlightSearchRequest } from '@/types/rapidapi';
 
 const searchSchema = z.object({
@@ -93,7 +94,19 @@ async function performSearch(params: SearchParams): Promise<SearchResults> {
 
 async function searchFlights(params: SearchParams): Promise<Flight[]> {
   try {
-    // Try RapidAPI first
+    console.log('Searching flights with real-time data...');
+    
+    // Always use the real-time flight service for current prices
+    const flights = await RealtimeFlightService.searchFlights(params);
+    
+    if (flights.length > 0) {
+      console.log(`Found ${flights.length} flights from real-time sources`);
+      return flights;
+    }
+    
+    console.log('Real-time search returned no results, trying RapidAPI fallback...');
+    
+    // Fallback to RapidAPI
     const flightRequest: FlightSearchRequest = {
       origin: params.origin.city,
       destination: params.destination.city,
@@ -158,6 +171,7 @@ async function searchFlights(params: SearchParams): Promise<Flight[]> {
       amenities: ['meals', 'wifi', 'entertainment'],
       refundable: true,
       changeable: true,
+      source: 'rapidapi'
     }));
 
     if (transformedFlights.length > 0) {
@@ -165,10 +179,10 @@ async function searchFlights(params: SearchParams): Promise<Flight[]> {
     }
     
   } catch (error) {
-    console.error('RapidAPI flight search failed, using mock data:', error);
+    console.error('Flight search failed, using mock data:', error);
   }
 
-  // Fallback to mock data with INR pricing
+  // Final fallback to mock data with INR pricing
   const mockFlights: Flight[] = [
     {
       id: 'flight-1',
@@ -209,9 +223,23 @@ async function searchFlights(params: SearchParams): Promise<Flight[]> {
         breakdown: { base: 3800, taxes: 500, fees: 200 },
       },
       airline: 'IndiGo',
+      stops: 0,
+      baggage: {
+        checkedBags: 1,
+        carryOnBags: 1,
+        personalItem: true,
+      },
       amenities: ['meals', 'wifi'],
       refundable: true,
       changeable: true,
+      source: 'mock',
+      mlPrediction: {
+        predictedPrice: 4200,
+        confidence: 0.85,
+        recommendation: 'Good price - consider booking',
+        priceRange: { min: 4000, max: 5000 },
+        savingsPercent: 7
+      }
     },
     {
       id: 'flight-2',
@@ -252,9 +280,23 @@ async function searchFlights(params: SearchParams): Promise<Flight[]> {
         breakdown: { base: 3600, taxes: 450, fees: 150 },
       },
       airline: 'SpiceJet',
+      stops: 0,
+      baggage: {
+        checkedBags: 1,
+        carryOnBags: 1,
+        personalItem: true,
+      },
       amenities: ['meals'],
       refundable: false,
       changeable: true,
+      source: 'mock',
+      mlPrediction: {
+        predictedPrice: 4000,
+        confidence: 0.78,
+        recommendation: 'Price slightly above prediction',
+        priceRange: { min: 3800, max: 4500 },
+        savingsPercent: 5
+      }
     },
   ];
 

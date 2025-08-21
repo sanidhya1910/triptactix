@@ -2,43 +2,40 @@
 
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { MapPinIcon, CalendarIcon, UsersIcon } from '@heroicons/react/24/outline';
-import { SearchParams, Location } from '@/types/travel';
-
-const searchSchema = z.object({
-  origin: z.string().min(1, 'Origin is required'),
-  destination: z.string().min(1, 'Destination is required'),
-  departureDate: z.string().min(1, 'Departure date is required'),
-  returnDate: z.string().optional(),
-  adults: z.number().min(1, 'At least 1 adult required').max(9),
-  children: z.number().min(0).max(9),
-  infants: z.number().min(0).max(9),
-  travelClass: z.enum(['economy', 'premium', 'business', 'first']),
-});
-
-type SearchFormData = z.infer<typeof searchSchema>;
+import { SearchParams } from '@/types/travel';
+import CityAutocomplete from '@/components/ui/CityAutocomplete';
+import { City } from '@/lib/cities';
+import { SparklesIcon, ClockIcon } from '@heroicons/react/24/outline';
 
 interface SearchFormProps {
-  onSearch: (params: SearchParams) => void;
+  onSearch: (params: SearchParams, useMLPredictions: boolean) => void;
   loading?: boolean;
 }
 
-export function SearchForm({ onSearch, loading = false }: SearchFormProps) {
-  const [tripType, setTripType] = useState<'one-way' | 'round-trip'>('round-trip');
-  
+interface SearchFormData {
+  departureDate: string;
+  returnDate?: string;
+  adults: number;
+  children: number;
+  infants: number;
+  travelClass: 'economy' | 'premium' | 'business' | 'first';
+}
+
+export default function SearchForm({ onSearch, loading = false }: SearchFormProps) {
+  const [tripType, setTripType] = useState<'one-way' | 'round-trip'>('one-way');
+  const [originCity, setOriginCity] = useState<City | null>(null);
+  const [destinationCity, setDestinationCity] = useState<City | null>(null);
+  const [useMLPredictions, setUseMLPredictions] = useState(false);
+
   const {
     register,
     handleSubmit,
+    formState: { errors },
     watch,
     setValue,
-    formState: { errors },
   } = useForm<SearchFormData>({
-    resolver: zodResolver(searchSchema),
     defaultValues: {
       adults: 1,
       children: 0,
@@ -48,23 +45,26 @@ export function SearchForm({ onSearch, loading = false }: SearchFormProps) {
   });
 
   const onSubmit = (data: SearchFormData) => {
-    // Convert form data to SearchParams type
-    // In a real app, you'd fetch actual location data
+    if (!originCity || !destinationCity) {
+      alert('Please select valid cities for both origin and destination');
+      return;
+    }
+
     const searchParams: SearchParams = {
       origin: {
         id: '1',
-        name: data.origin,
-        code: data.origin.toUpperCase().slice(0, 3),
-        city: data.origin,
-        country: 'Unknown',
+        name: originCity.name,
+        code: originCity.code,
+        city: originCity.name,
+        country: originCity.country,
         type: 'airport',
       },
       destination: {
         id: '2',
-        name: data.destination,
-        code: data.destination.toUpperCase().slice(0, 3),
-        city: data.destination,
-        country: 'Unknown',
+        name: destinationCity.name,
+        code: destinationCity.code,
+        city: destinationCity.name,
+        country: destinationCity.country,
         type: 'airport',
       },
       departureDate: new Date(data.departureDate),
@@ -77,161 +77,183 @@ export function SearchForm({ onSearch, loading = false }: SearchFormProps) {
       travelClass: data.travelClass,
     };
 
-    onSearch(searchParams);
+    onSearch(searchParams, useMLPredictions);
   };
 
   return (
-    <Card className="w-full max-w-4xl mx-auto">
-      <CardHeader>
-        <CardTitle className="text-center text-2xl font-bold text-neutral-900">
-          Find Your Perfect Trip
+    <Card className="w-full max-w-4xl mx-auto shadow-lg border border-neutral-200 bg-white rounded-2xl">
+      <CardHeader className="space-y-6 p-8">
+        <CardTitle className="text-center text-2xl font-bold text-black">
+          Find Your Perfect Flight
         </CardTitle>
-        <div className="flex justify-center space-x-4 mt-4">
-          <Button
-            type="button"
-            variant={tripType === 'round-trip' ? 'default' : 'outline'}
-            onClick={() => setTripType('round-trip')}
-            className={`${
-              tripType === 'round-trip'
-                ? 'bg-black text-white hover:bg-neutral-800'
-                : 'bg-white text-black border-neutral-300 hover:bg-neutral-50'
-            }`}
-          >
-            Round Trip
-          </Button>
+        
+        {/* Trip Type Selection */}
+        <div className="flex justify-center space-x-4">
           <Button
             type="button"
             variant={tripType === 'one-way' ? 'default' : 'outline'}
             onClick={() => setTripType('one-way')}
-            className={`${
-              tripType === 'one-way'
-                ? 'bg-black text-white hover:bg-neutral-800'
-                : 'bg-white text-black border-neutral-300 hover:bg-neutral-50'
-            }`}
+            className="px-6 py-2 rounded-xl font-semibold"
           >
             One Way
           </Button>
+          <Button
+            type="button"
+            variant={tripType === 'round-trip' ? 'default' : 'outline'}
+            onClick={() => setTripType('round-trip')}
+            className="px-6 py-2 rounded-xl font-semibold"
+          >
+            Round Trip
+          </Button>
         </div>
+
+        {/* ML Predictions Toggle */}
+        <div className="flex items-center justify-center space-x-3 p-4 bg-neutral-100 rounded-xl border border-neutral-200">
+          <SparklesIcon className="w-5 h-5 text-black" />
+          <label className="flex items-center space-x-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={useMLPredictions}
+              onChange={(e) => setUseMLPredictions(e.target.checked)}
+              className="w-4 h-4 text-black rounded border-neutral-300 focus:ring-neutral-500"
+            />
+            <span className="text-sm font-semibold text-neutral-700">
+              Enable ML Price Predictions & Analysis
+            </span>
+          </label>
+          <ClockIcon className="w-5 h-5 text-neutral-600" />
+        </div>
+        
+        {useMLPredictions && (
+          <div className="text-center p-3 bg-blue-50 border border-blue-200 rounded-xl">
+            <p className="text-sm text-blue-800">
+              <strong>ML Predictions enabled:</strong> Get AI-powered price forecasts, savings recommendations, and price trend analysis.
+            </p>
+          </div>
+        )}
       </CardHeader>
-      
-      <CardContent>
+
+      <CardContent className="p-8">
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
           {/* Origin and Destination */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <label className="text-sm font-black text-neutral-900 flex items-center">
-                <MapPinIcon className="w-4 h-4 mr-2" />
-                From
-              </label>
-              <Input
-                {...register('origin')}
-                placeholder="Origin city or airport"
-                className="w-full"
+              <label className="text-sm font-bold text-black">From</label>
+              <CityAutocomplete
+                value={originCity?.name || ''}
+                onChange={(city, inputValue) => setOriginCity(city)}
+                placeholder="Select origin city"
               />
-              {errors.origin && (
-                <p className="text-red-500 text-sm">{errors.origin.message}</p>
-              )}
             </div>
-            
             <div className="space-y-2">
-              <label className="text-sm font-black text-neutral-900 flex items-center">
-                <MapPinIcon className="w-4 h-4 mr-2" />
-                To
-              </label>
-              <Input
-                {...register('destination')}
-                placeholder="Destination city or airport"
-                className="w-full"
+              <label className="text-sm font-bold text-black">To</label>
+              <CityAutocomplete
+                value={destinationCity?.name || ''}
+                onChange={(city, inputValue) => setDestinationCity(city)}
+                placeholder="Select destination city"
               />
-              {errors.destination && (
-                <p className="text-red-500 text-sm">{errors.destination.message}</p>
-              )}
             </div>
           </div>
 
           {/* Dates */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <label className="text-sm font-black text-neutral-900 flex items-center">
-                <CalendarIcon className="w-4 h-4 mr-2" />
-                Departure
-              </label>
-              <Input
-                {...register('departureDate')}
+              <label className="text-sm font-bold text-black">Departure Date</label>
+              <input
+                {...register('departureDate', { required: 'Departure date is required' })}
                 type="date"
-                className="w-full"
-                min={new Date().toISOString().split('T')[0]}
+                className="w-full h-12 rounded-xl border-2 border-neutral-200 focus:border-black bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-200"
               />
               {errors.departureDate && (
-                <p className="text-red-500 text-sm">{errors.departureDate.message}</p>
+                <span className="text-red-500 text-xs">{errors.departureDate.message}</span>
               )}
             </div>
             
             {tripType === 'round-trip' && (
               <div className="space-y-2">
-                <label className="text-sm font-black text-neutral-900 flex items-center">
-                  <CalendarIcon className="w-4 h-4 mr-2" />
-                  Return
-                </label>
-                <Input
+                <label className="text-sm font-bold text-black">Return Date</label>
+                <input
                   {...register('returnDate')}
                   type="date"
-                  className="w-full"
-                  min={watch('departureDate')}
+                  className="w-full h-12 rounded-xl border-2 border-neutral-200 focus:border-black bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-200"
                 />
-                {errors.returnDate && (
-                  <p className="text-red-500 text-sm">{errors.returnDate.message}</p>
-                )}
               </div>
             )}
           </div>
 
           {/* Passengers and Class */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <label className="text-sm font-black text-neutral-900 flex items-center">
-                <UsersIcon className="w-4 h-4 mr-2" />
-                Passengers
-              </label>
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="text-xs font-bold text-neutral-900">Adults</label>
-                  <Input
-                    {...register('adults', { valueAsNumber: true })}
-                    type="number"
-                    min="1"
-                    max="9"
-                    className="text-center"
-                  />
+            <div className="space-y-4">
+              <label className="text-sm font-bold text-black">Passengers</label>
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-neutral-600">Adults</span>
+                  <div className="flex items-center space-x-3">
+                    <button
+                      type="button"
+                      onClick={() => setValue('adults', Math.max(1, watch('adults') - 1))}
+                      className="w-8 h-8 rounded-full border-2 border-neutral-200 flex items-center justify-center hover:border-black transition-colors"
+                    >
+                      -
+                    </button>
+                    <span className="text-sm font-medium w-6 text-center">{watch('adults')}</span>
+                    <button
+                      type="button"
+                      onClick={() => setValue('adults', Math.min(9, watch('adults') + 1))}
+                      className="w-8 h-8 rounded-full border-2 border-neutral-200 flex items-center justify-center hover:border-black transition-colors"
+                    >
+                      +
+                    </button>
+                  </div>
                 </div>
-                <div>
-                  <label className="text-xs font-bold text-neutral-900">Children</label>
-                  <Input
-                    {...register('children', { valueAsNumber: true })}
-                    type="number"
-                    min="0"
-                    max="9"
-                    className="text-center"
-                  />
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-neutral-600">Children</span>
+                  <div className="flex items-center space-x-3">
+                    <button
+                      type="button"
+                      onClick={() => setValue('children', Math.max(0, watch('children') - 1))}
+                      className="w-8 h-8 rounded-full border-2 border-neutral-200 flex items-center justify-center hover:border-black transition-colors"
+                    >
+                      -
+                    </button>
+                    <span className="text-sm font-medium w-6 text-center">{watch('children')}</span>
+                    <button
+                      type="button"
+                      onClick={() => setValue('children', Math.min(9, watch('children') + 1))}
+                      className="w-8 h-8 rounded-full border-2 border-neutral-200 flex items-center justify-center hover:border-black transition-colors"
+                    >
+                      +
+                    </button>
+                  </div>
                 </div>
-                <div>
-                  <label className="text-xs font-bold text-neutral-900">Infants</label>
-                  <Input
-                    {...register('infants', { valueAsNumber: true })}
-                    type="number"
-                    min="0"
-                    max="9"
-                    className="text-center"
-                  />
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-neutral-600">Infants</span>
+                  <div className="flex items-center space-x-3">
+                    <button
+                      type="button"
+                      onClick={() => setValue('infants', Math.max(0, watch('infants') - 1))}
+                      className="w-8 h-8 rounded-full border-2 border-neutral-200 flex items-center justify-center hover:border-black transition-colors"
+                    >
+                      -
+                    </button>
+                    <span className="text-sm font-medium w-6 text-center">{watch('infants')}</span>
+                    <button
+                      type="button"
+                      onClick={() => setValue('infants', Math.min(9, watch('infants') + 1))}
+                      className="w-8 h-8 rounded-full border-2 border-neutral-200 flex items-center justify-center hover:border-black transition-colors"
+                    >
+                      +
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
             
             <div className="space-y-2">
-              <label className="text-sm font-black text-neutral-900">Travel Class</label>
+              <label className="text-sm font-bold text-black">Travel Class</label>
               <select
                 {...register('travelClass')}
-                className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                className="w-full h-12 rounded-xl border-2 border-neutral-200 focus:border-black bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-200"
               >
                 <option value="economy">Economy</option>
                 <option value="premium">Premium Economy</option>
@@ -243,10 +265,23 @@ export function SearchForm({ onSearch, loading = false }: SearchFormProps) {
 
           <Button
             type="submit"
-            className="w-full h-12 text-lg font-semibold bg-blue-600 hover:bg-blue-700"
+            className="w-full h-14 text-lg font-bold rounded-xl transition-all duration-300 transform hover:scale-105 shadow-lg bg-black hover:bg-neutral-800 text-white"
             disabled={loading}
           >
-            {loading ? 'Searching...' : 'Search Flights, Trains & Hotels'}
+            {loading ? (
+              <div className="flex items-center justify-center space-x-2">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                <span>Searching Real-time Flight Data...</span>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center space-x-2">
+                <SparklesIcon className="w-5 h-5" />
+                <span>
+                  Search Real-time Flights{useMLPredictions ? ' with ML Predictions' : ''}
+                </span>
+                <ClockIcon className="w-5 h-5" />
+              </div>
+            )}
           </Button>
         </form>
       </CardContent>

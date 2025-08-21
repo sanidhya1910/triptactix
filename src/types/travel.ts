@@ -55,9 +55,27 @@ export interface Flight {
   };
   airline: string;
   bookingClass: string;
+  stops?: number; // Total stops for the flight
+  baggage?: {
+    checkedBags: number;
+    carryOnBags: number;
+    personalItem: boolean;
+  };
   amenities: string[];
   refundable: boolean;
   changeable: boolean;
+  mlPrediction?: {
+    predictedPrice: number;
+    confidence: number;
+    recommendation: string;
+    priceRange: {
+      min: number;
+      max: number;
+    };
+    savingsPercent: number;
+  };
+  source?: string;
+  bookingUrl?: string;
 }
 
 // Train types
