@@ -2,220 +2,228 @@
 
 import Link from 'next/link';
 import { 
-  PaperAirplaneIcon, 
-  SparklesIcon,
-  MapIcon,
-  CalendarDaysIcon,
-  CurrencyDollarIcon,
-  StarIcon,
   ArrowRightIcon,
-  ChartBarIcon,
-  ClockIcon,
-  MagnifyingGlassIcon
+  SparklesIcon,
+  PaperAirplaneIcon,
+  MapIcon,
+  StarIcon,
+  MagnifyingGlassIcon,
+  CalendarDaysIcon,
+  ChartBarIcon
 } from '@heroicons/react/24/outline';
 import { Button } from '@/components/ui/button';
-import { ModernLayout } from '@/components/layout/ModernLayout';
-import { AnimatedSection, FadeInWhenVisible, StaggeredContainer, ScaleOnHover } from '@/components/ui/animations';
-import { FeatureCard, ModernCard, GlassCard } from '@/components/ui/modern-card';
-import { ModernBadge } from '@/components/ui/modern-badge';
 
 export default function HomePage() {
-  const features = [
-    {
-      icon: <MagnifyingGlassIcon className="w-6 h-6" />,
-      title: 'Smart Search & Compare',
-      description: 'AI-powered search across multiple platforms to find the best flights, trains, and travel packages with real-time pricing.',
-    },
-    {
-      icon: <ChartBarIcon className="w-6 h-6" />,
-      title: 'Price Predictions',
-      description: 'Machine learning algorithms predict price trends and suggest the best time to book for maximum savings.',
-    },
-    {
-      icon: <SparklesIcon className="w-6 h-6" />,
-      title: 'AI Travel Planning',
-      description: 'Get personalized itineraries created by AI that considers your preferences, budget, and travel style.',
-    },
-    {
-      icon: <MapIcon className="w-6 h-6" />,
-      title: 'Custom Packages',
-      description: 'Create comprehensive travel packages combining flights, accommodation, and activities in one seamless booking.',
-    },
-    {
-      icon: <ClockIcon className="w-6 h-6" />,
-      title: 'Real-time Updates',
-      description: 'Stay informed with live updates on prices, delays, gate changes, and travel advisories.',
-    },
-    {
-      icon: <StarIcon className="w-6 h-6" />,
-      title: 'Premium Experience',
-      description: 'Enjoy white-glove service with 24/7 support, exclusive deals, and seamless booking management.',
-    },
-  ];
-
   return (
-    <ModernLayout>
-      {/* Hero Section */}
-      <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
-        {/* Background */}
-        <div className="absolute inset-0 bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800"></div>
-        
-        {/* Animated Background Elements */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute top-20 left-10 w-32 h-32 bg-white/10 rounded-full blur-xl animate-bounce"></div>
-          <div className="absolute top-40 right-20 w-48 h-48 bg-yellow-300/20 rounded-full blur-2xl animate-pulse"></div>
-          <div className="absolute bottom-20 left-1/4 w-64 h-64 bg-pink-300/15 rounded-full blur-3xl animate-bounce"></div>
-          <div className="absolute bottom-40 right-10 w-40 h-40 bg-green-300/20 rounded-full blur-2xl animate-pulse"></div>
-        </div>
-        
-        {/* Floating Icons */}
-        <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute top-32 left-20 text-white/20 animate-bounce">
-            <PaperAirplaneIcon className="w-8 h-8 transform rotate-45" />
-          </div>
-          <div className="absolute top-64 right-32 text-white/20 animate-pulse">
-            <MapIcon className="w-10 h-10" />
-          </div>
-          <div className="absolute bottom-32 left-32 text-white/20 animate-bounce">
-            <StarIcon className="w-12 h-12" />
-          </div>
-        </div>
-        
-        <div className="relative z-10 text-center px-4 sm:px-6 lg:px-8 max-w-5xl mx-auto">
-          <AnimatedSection direction="up" className="space-y-8">
-            <div className="space-y-4">
-              <ModernBadge variant="secondary" className="bg-white/20 text-white border-white/30 mb-4">
-                ✨ AI-Powered Travel Planning
-              </ModernBadge>
-              
-              <h1 className="text-5xl md:text-7xl font-bold text-white leading-tight">
-                Your Perfect Trip
-                <span className="block bg-gradient-to-r from-yellow-300 to-orange-300 bg-clip-text text-transparent">
-                  Starts Here
-                </span>
-              </h1>
-              
-              <p className="text-xl md:text-2xl text-white/90 max-w-3xl mx-auto leading-relaxed">
-                Discover your perfect trip with AI-powered planning. Get personalized itineraries, 
-                real-time pricing, and seamless booking all in one intelligent platform.
-              </p>
+    <div className="min-h-screen bg-white">
+      {/* Navigation */}
+      <nav className="fixed top-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-md border-b border-neutral-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <Link href="/" className="text-2xl font-bold text-black">
+              Triptactix
+            </Link>
+            
+            <div className="hidden md:flex items-center space-x-8">
+              <Link href="/search" className="text-neutral-600 hover:text-black transition-colors">
+                Search
+              </Link>
+              <Link href="/itinerary" className="text-neutral-600 hover:text-black transition-colors">
+                AI Planner
+              </Link>
+              <Link href="/dashboard" className="text-neutral-600 hover:text-black transition-colors">
+                Dashboard
+              </Link>
+              <Button asChild>
+                <Link href="/search">
+                  Get Started
+                </Link>
+              </Button>
             </div>
             
-            <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-              <ScaleOnHover>
-                <Button 
-                  asChild
-                  size="lg"
-                  className="bg-white text-blue-600 hover:bg-blue-50 border-2 border-white shadow-2xl px-8 py-4 text-lg font-bold"
-                >
-                  <Link href="/itinerary" className="flex items-center gap-3">
-                    <SparklesIcon className="w-5 h-5" />
-                    Plan My Trip with AI
-                    <ArrowRightIcon className="w-4 h-4" />
-                  </Link>
-                </Button>
-              </ScaleOnHover>
-              
-              <ScaleOnHover>
-                <Button 
-                  asChild
-                  variant="outline"
-                  size="lg"
-                  className="bg-white/20 backdrop-blur-sm text-white border-2 border-white hover:bg-white/30 font-bold px-8 py-4 text-lg"
-                >
-                  <Link href="/search">Search & Compare</Link>
-                </Button>
-              </ScaleOnHover>
+            {/* Mobile menu button */}
+            <div className="md:hidden">
+              <Button variant="ghost" size="sm">
+                Menu
+              </Button>
             </div>
-          </AnimatedSection>
+          </div>
+        </div>
+      </nav>
+
+      {/* Hero Section */}
+      <section className="pt-24 pb-20 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-4xl mx-auto text-center">
+          <div className="inline-flex items-center gap-2 bg-neutral-100 px-4 py-2 rounded-full text-sm text-neutral-700 mb-8">
+            <SparklesIcon className="w-4 h-4" />
+            AI-Powered Travel Planning
+          </div>
+          
+          <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold text-black mb-8 leading-tight">
+            Plan Your Perfect
+            <br />
+            <span className="text-neutral-600">Journey</span>
+          </h1>
+          
+          <p className="text-xl text-neutral-600 mb-12 max-w-2xl mx-auto leading-relaxed">
+            Discover personalized travel experiences with AI-powered itinerary planning, 
+            real-time price comparisons, and seamless booking.
+          </p>
+          
+          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+            <Button size="lg" className="px-8 py-4 text-lg" asChild>
+              <Link href="/itinerary" className="flex items-center gap-2">
+                Start Planning
+                <ArrowRightIcon className="w-5 h-5" />
+              </Link>
+            </Button>
+            
+            <Button variant="outline" size="lg" className="px-8 py-4 text-lg" asChild>
+              <Link href="/search">
+                Search Flights
+              </Link>
+            </Button>
+          </div>
         </div>
       </section>
 
       {/* Features Section */}
-      <section className="py-24 bg-white relative">
-        <div className="absolute inset-0 bg-gradient-to-b from-blue-50/30 to-white"></div>
-        
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <FadeInWhenVisible>
-            <div className="text-center mb-16">
-              <ModernBadge variant="info" className="mb-4">
-                🚀 Everything You Need
-              </ModernBadge>
-              <h2 className="text-4xl md:text-5xl font-bold text-neutral-900 mb-6">
-                Perfect Travel Made Simple
-              </h2>
-              <p className="text-xl text-neutral-600 max-w-3xl mx-auto">
-                Our AI-powered platform combines intelligent planning with comprehensive booking 
-                to make travel effortless and enjoyable.
+      <section className="py-20 bg-neutral-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-16">
+            <h2 className="text-3xl md:text-4xl font-bold text-black mb-6">
+              Everything You Need for Travel
+            </h2>
+            <p className="text-xl text-neutral-600 max-w-2xl mx-auto">
+              Our platform combines intelligent planning with comprehensive booking tools.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div className="bg-white p-8 rounded-2xl border border-neutral-200 hover:shadow-lg transition-shadow">
+              <div className="w-12 h-12 bg-black rounded-xl flex items-center justify-center mb-6">
+                <SparklesIcon className="w-6 h-6 text-white" />
+              </div>
+              <h3 className="text-xl font-semibold text-black mb-4">AI Trip Planning</h3>
+              <p className="text-neutral-600">
+                Get personalized itineraries powered by artificial intelligence that match your preferences.
               </p>
             </div>
-          </FadeInWhenVisible>
 
-          <StaggeredContainer className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {features.map((feature, index) => (
-              <FadeInWhenVisible key={feature.title}>
-                <FeatureCard
-                  icon={feature.icon}
-                  title={feature.title}
-                  description={feature.description}
-                />
-              </FadeInWhenVisible>
-            ))}
-          </StaggeredContainer>
+            <div className="bg-white p-8 rounded-2xl border border-neutral-200 hover:shadow-lg transition-shadow">
+              <div className="w-12 h-12 bg-black rounded-xl flex items-center justify-center mb-6">
+                <MagnifyingGlassIcon className="w-6 h-6 text-white" />
+              </div>
+              <h3 className="text-xl font-semibold text-black mb-4">Smart Search</h3>
+              <p className="text-neutral-600">
+                Compare prices across multiple platforms and find the best deals for flights and hotels.
+              </p>
+            </div>
+
+            <div className="bg-white p-8 rounded-2xl border border-neutral-200 hover:shadow-lg transition-shadow">
+              <div className="w-12 h-12 bg-black rounded-xl flex items-center justify-center mb-6">
+                <ChartBarIcon className="w-6 h-6 text-white" />
+              </div>
+              <h3 className="text-xl font-semibold text-black mb-4">Price Predictions</h3>
+              <p className="text-neutral-600">
+                Get insights on when to book with our AI-powered price prediction algorithms.
+              </p>
+            </div>
+          </div>
         </div>
       </section>
 
       {/* Stats Section */}
-      <section className="py-20 bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
+      <section className="py-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <FadeInWhenVisible>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-              {[
-                { number: '100K+', label: 'Happy Travelers' },
-                { number: '500+', label: 'Destinations' },
-                { number: '50K+', label: 'Bookings Made' },
-                { number: '98%', label: 'Satisfaction Rate' },
-              ].map((stat, index) => (
-                <div key={stat.label} className="text-center">
-                  <AnimatedSection delay={index * 0.1}>
-                    <div className="text-4xl md:text-5xl font-bold mb-2">{stat.number}</div>
-                    <div className="text-white/80 font-medium">{stat.label}</div>
-                  </AnimatedSection>
-                </div>
-              ))}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
+            <div>
+              <div className="text-4xl font-bold text-black mb-2">100K+</div>
+              <div className="text-neutral-600">Happy Travelers</div>
             </div>
-          </FadeInWhenVisible>
+            <div>
+              <div className="text-4xl font-bold text-black mb-2">500+</div>
+              <div className="text-neutral-600">Destinations</div>
+            </div>
+            <div>
+              <div className="text-4xl font-bold text-black mb-2">50K+</div>
+              <div className="text-neutral-600">Trips Planned</div>
+            </div>
+            <div>
+              <div className="text-4xl font-bold text-black mb-2">98%</div>
+              <div className="text-neutral-600">Satisfaction</div>
+            </div>
+          </div>
         </div>
       </section>
 
       {/* CTA Section */}
-      <section className="py-24 bg-gradient-to-br from-neutral-50 to-blue-50">
+      <section className="py-20 bg-neutral-50">
         <div className="max-w-4xl mx-auto text-center px-4 sm:px-6 lg:px-8">
-          <FadeInWhenVisible>
-            <GlassCard className="p-12 bg-white/60 backdrop-blur-sm">
-              <h2 className="text-4xl font-bold text-neutral-900 mb-6">
-                Ready to Start Your Journey?
-              </h2>
-              <p className="text-xl text-neutral-600 mb-8">
-                Join thousands of travelers who trust Triptactix for their perfect trips.
-              </p>
-              <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                <ScaleOnHover>
-                  <Button asChild size="lg" className="px-8 py-4 text-lg font-bold">
-                    <Link href="/search">
-                      Start Planning Now
-                      <ArrowRightIcon className="w-5 h-5 ml-2" />
-                    </Link>
-                  </Button>
-                </ScaleOnHover>
-                <Button asChild variant="outline" size="lg" className="px-8 py-4 text-lg">
-                  <Link href="/about">Learn More</Link>
-                </Button>
-              </div>
-            </GlassCard>
-          </FadeInWhenVisible>
+          <h2 className="text-3xl md:text-4xl font-bold text-black mb-6">
+            Ready to Start Your Adventure?
+          </h2>
+          <p className="text-xl text-neutral-600 mb-8">
+            Join thousands of travelers who plan their perfect trips with Triptactix.
+          </p>
+          <Button size="lg" className="px-8 py-4 text-lg" asChild>
+            <Link href="/search" className="flex items-center gap-2">
+              Start Planning Now
+              <ArrowRightIcon className="w-5 h-5" />
+            </Link>
+          </Button>
         </div>
       </section>
-    </ModernLayout>
+
+      {/* Footer */}
+      <footer className="bg-black text-white py-16">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+            <div className="col-span-2">
+              <h3 className="text-2xl font-bold mb-4">Triptactix</h3>
+              <p className="text-neutral-300 mb-6 max-w-md">
+                AI-powered travel planning platform for personalized itineraries and seamless booking experiences.
+              </p>
+            </div>
+            
+            <div>
+              <h4 className="font-semibold mb-4">Platform</h4>
+              <div className="space-y-2">
+                <Link href="/search" className="block text-neutral-300 hover:text-white transition-colors">
+                  Search Flights
+                </Link>
+                <Link href="/itinerary" className="block text-neutral-300 hover:text-white transition-colors">
+                  AI Planner
+                </Link>
+                <Link href="/dashboard" className="block text-neutral-300 hover:text-white transition-colors">
+                  Dashboard
+                </Link>
+              </div>
+            </div>
+            
+            <div>
+              <h4 className="font-semibold mb-4">Company</h4>
+              <div className="space-y-2">
+                <Link href="#" className="block text-neutral-300 hover:text-white transition-colors">
+                  About
+                </Link>
+                <Link href="#" className="block text-neutral-300 hover:text-white transition-colors">
+                  Contact
+                </Link>
+                <Link href="#" className="block text-neutral-300 hover:text-white transition-colors">
+                  Privacy
+                </Link>
+              </div>
+            </div>
+          </div>
+          
+          <div className="border-t border-neutral-800 mt-12 pt-8 text-center">
+            <p className="text-neutral-400">
+              © 2024 Triptactix. All rights reserved.
+            </p>
+          </div>
+        </div>
+      </footer>
+    </div>
   );
 }

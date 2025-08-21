@@ -46,4 +46,9 @@ next-env.d.ts
 
 setup-env.sh
 
+# Python ML API
 python-ml-api/venv
+python-ml-api/models/
+
+# Other directories
+/swaarg
