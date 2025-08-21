@@ -13,10 +13,10 @@ const nextConfig: NextConfig = {
   images: {
     unoptimized: true,
   },
-  // Output configuration for Cloudflare Pages
-  output: 'export',
-  trailingSlash: true,
-  distDir: 'out',
+  // Temporarily disable static export to test API routes
+  // output: 'export',
+  // trailingSlash: true,
+  // distDir: 'out',
   // Disable API routes for static export
   generateBuildId: () => 'build',
 };

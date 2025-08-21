@@ -328,6 +328,112 @@ async def compare_flights_with_ml(request: FlightSearchRequest):
         logger.error(f"Flight comparison error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Flight comparison failed: {str(e)}")
 
+class PriceTrendRequest(BaseModel):
+    source_city: str
+    destination_city: str
+    days_ahead: Optional[int] = 30
+
+class PriceAnalysisRequest(BaseModel):
+    current_price: int
+    source_city: str
+    destination_city: str
+    departure_date: str
+
+@app.post("/price-trend")
+async def get_price_trend(request: PriceTrendRequest):
+    """Get price trend prediction for a route"""
+    try:
+        logger.info(f"Getting price trend for {request.source_city} -> {request.destination_city}")
+        
+        trends = ml_model.get_price_trend(
+            request.source_city,
+            request.destination_city,
+            request.days_ahead or 30
+        )
+        
+        return {
+            "success": True,
+            "route": f"{request.source_city} -> {request.destination_city}",
+            "trend_data": trends,
+            "summary": {
+                "min_price": min(t['predicted_price'] for t in trends) if trends else 0,
+                "max_price": max(t['predicted_price'] for t in trends) if trends else 0,
+                "avg_price": sum(t['predicted_price'] for t in trends) / len(trends) if trends else 0
+            }
+        }
+    
+    except Exception as e:
+        logger.error(f"Price trend failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Price trend analysis failed: {str(e)}")
+
+@app.get("/price-trend")
+async def get_price_trend_get(source_city: str, destination_city: str, days_ahead: int = 30):
+    """GET variant for price trend to aid browser testing; mirrors POST response shape"""
+    try:
+        logger.info(f"Getting price trend (GET) for {source_city} -> {destination_city}")
+
+        trends = ml_model.get_price_trend(source_city, destination_city, days_ahead or 30)
+
+        return {
+            "success": True,
+            "route": f"{source_city} -> {destination_city}",
+            "trend_data": trends,
+            "summary": {
+                "min_price": min(t['predicted_price'] for t in trends) if trends else 0,
+                "max_price": max(t['predicted_price'] for t in trends) if trends else 0,
+                "avg_price": sum(t['predicted_price'] for t in trends) / len(trends) if trends else 0
+            }
+        }
+    except Exception as e:
+        logger.error(f"Price trend (GET) failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Price trend analysis failed: {str(e)}")
+
+@app.post("/analyze-price")
+async def analyze_current_price(request: PriceAnalysisRequest):
+    """Analyze current price vs predicted trends and provide recommendation"""
+    try:
+        logger.info(f"Analyzing price {request.current_price} for {request.source_city} -> {request.destination_city}")
+        
+        analysis = ml_model.analyze_price_vs_current(
+            request.current_price,
+            request.source_city,
+            request.destination_city,
+            request.departure_date
+        )
+        
+        return {
+            "success": True,
+            "route": f"{request.source_city} -> {request.destination_city}",
+            "analysis": analysis
+        }
+    
+    except Exception as e:
+        logger.error(f"Price analysis failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Price analysis failed: {str(e)}")
+
+@app.get("/available-cities")
+async def get_available_cities():
+    """Get list of cities available in the ML model"""
+    try:
+        # Load real data to get available cities
+        df = ml_model.load_real_data()
+        
+        source_cities = sorted(df['source_city'].unique().tolist()) if not df.empty else []
+        dest_cities = sorted(df['destination_city'].unique().tolist()) if not df.empty else []
+        
+        # Get combined unique cities
+        all_cities = sorted(list(set(source_cities + dest_cities)))
+        
+        return {
+            "success": True,
+            "cities": all_cities,
+            "total_cities": len(all_cities)
+        }
+    
+    except Exception as e:
+        logger.error(f"Get cities failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get available cities: {str(e)}")
+
 @app.get("/historical-prices/{origin}/{destination}")
 async def get_historical_prices(origin: str, destination: str, days_back: int = 30):
     """Get historical price data for a route"""

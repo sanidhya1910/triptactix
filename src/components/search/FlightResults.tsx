@@ -5,6 +5,7 @@ import { Flight } from '@/types/travel';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { formatCurrency, formatDateTime, formatDuration } from '@/lib/utils';
+import PriceTrendAnalysis from '@/components/charts/PriceTrendAnalysis';
 import { 
   ClockIcon, 
   ArrowRightIcon,
@@ -124,7 +125,7 @@ export function FlightCard({ flight, onSelect }: FlightCardProps) {
         )}
 
         {/* Flight Details */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between mb-4">
           <div className="flex items-center space-x-4">
             <div className="flex items-center space-x-2">
               {flight.amenities.includes('wifi') && (
@@ -150,6 +151,44 @@ export function FlightCard({ flight, onSelect }: FlightCardProps) {
             Select Flight
           </Button>
         </div>
+
+        {/* ML Prediction Insights */}
+        {flight.mlPrediction && (
+          <div className="mt-4 p-3 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border border-indigo-200">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🤖</span>
+                <span className="text-sm font-medium text-indigo-800">AI Price Analysis</span>
+              </div>
+              <div className="text-right">
+                <div className="text-xs text-gray-500">Confidence</div>
+                <div className={`text-sm font-bold ${
+                  flight.mlPrediction.confidence >= 0.7 ? 'text-green-600' :
+                  flight.mlPrediction.confidence >= 0.5 ? 'text-yellow-600' : 'text-red-600'
+                }`}>
+                  {Math.round(flight.mlPrediction.confidence * 100)}%
+                </div>
+              </div>
+            </div>
+            
+            <div className="mt-2 flex items-center justify-between">
+              <div className="text-sm text-gray-700">
+                {flight.mlPrediction.recommendation}
+              </div>
+              <div className="text-right">
+                <div className="text-xs text-gray-500">Predicted</div>
+                <div className="text-lg font-bold text-indigo-600">
+                  ₹{flight.mlPrediction.predictedPrice.toLocaleString()}
+                </div>
+                {flight.mlPrediction.savingsPercent !== 0 && (
+                  <div className={`text-xs ${flight.mlPrediction.savingsPercent > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                    {flight.mlPrediction.savingsPercent > 0 ? '+' : ''}{flight.mlPrediction.savingsPercent}% vs avg
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -159,9 +198,12 @@ interface FlightResultsProps {
   flights: Flight[];
   loading?: boolean;
   onSelectFlight: (flight: Flight) => void;
+  mlMode?: boolean;
+  originCity?: string;
+  destinationCity?: string;
 }
 
-export function FlightResults({ flights, loading, onSelectFlight }: FlightResultsProps) {
+export function FlightResults({ flights, loading, onSelectFlight, mlMode = false, originCity, destinationCity }: FlightResultsProps) {
   if (loading) {
     return (
       <div className="space-y-4">
@@ -187,7 +229,18 @@ export function FlightResults({ flights, loading, onSelectFlight }: FlightResult
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      {/* ML Price Trend Analysis */}
+    {mlMode && originCity && destinationCity && (
+        <PriceTrendAnalysis
+          sourceCity={originCity}
+          destinationCity={destinationCity}
+      currentPrice={flights.length ? Math.min(...flights.map(f => f.price.total)) : undefined}
+      departureDate={flights[0]?.outbound?.[0]?.departureTime}
+          className="mb-6"
+        />
+      )}
+      
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold">Flights ({flights.length})</h3>
         <div className="flex items-center space-x-2">

@@ -214,4 +214,5 @@ export type SearchResults = {
   searchId: string;
   searchParams: SearchParams;
   timestamp: Date;
+  mlMode?: boolean; // New field to indicate ML mode
 };

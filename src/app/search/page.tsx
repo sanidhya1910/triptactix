@@ -6,6 +6,7 @@ import { SearchParams, SearchResults, Flight } from '@/types/travel';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import PriceTrendAnalysis from '@/components/charts/PriceTrendAnalysis';
 import { 
   PaperAirplaneIcon,
   SparklesIcon,
@@ -40,52 +41,35 @@ export default function SearchPage() {
   const [realtimeResults, setRealtimeResults] = useState<RealtimeSearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [searchType, setSearchType] = useState<'standard' | 'realtime'>('standard');
+  const [currentSearchParams, setCurrentSearchParams] = useState<SearchParams | null>(null);
+  const [isMLMode, setIsMLMode] = useState(false);
 
   const handleSearch = async (params: SearchParams, useMLPredictions: boolean = false) => {
     setLoading(true);
     setSearchType(useMLPredictions ? 'realtime' : 'standard');
+    setCurrentSearchParams(params);
+    setIsMLMode(useMLPredictions);
     
     try {
-      if (useMLPredictions) {
-        console.log('Performing real-time flight search with ML predictions...');
-        
-        const response = await fetch('/api/realtime-flights', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            origin: params.origin.city,
-            destination: params.destination.city,
-            departureDate: params.departureDate.toISOString().split('T')[0],
-            returnDate: params.returnDate?.toISOString().split('T')[0],
-            passengers: params.passengers.adults,
-            travelClass: params.travelClass,
-          }),
-        });
+      console.log('Performing flight search...', useMLPredictions ? '(with ML predictions)' : '(standard)');
+      
+      const response = await fetch('/api/search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          ...params,
+          useMLPredictions, // Pass the ML flag
+        }),
+      });
 
-        const data: RealtimeSearchResponse = await response.json();
-        setRealtimeResults(data);
-        setSearchResults(null);
-        
+      const data = await response.json();
+      if (data.success) {
+        setSearchResults(data.data);
+        setRealtimeResults(null);
       } else {
-        console.log('Performing real-time flight search (without ML predictions)...');
-        
-        const response = await fetch('/api/search', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(params),
-        });
-
-        const data = await response.json();
-        if (data.success) {
-          setSearchResults(data.data);
-          setRealtimeResults(null);
-        } else {
-          throw new Error(data.error?.message || 'Search failed');
-        }
+        throw new Error(data.error?.message || 'Search failed');
       }
     } catch (error) {
       console.error('Search error:', error);
@@ -215,6 +199,18 @@ export default function SearchPage() {
                   </div>
                 )}
               </div>
+
+              {/* ML Price Trend Analysis */}
+              {isMLMode && currentSearchParams && (
+                <PriceTrendAnalysis
+                  sourceCity={currentSearchParams.origin.city}
+                  destinationCity={currentSearchParams.destination.city}
+                  currentPrice={(searchResults?.flights || []).reduce((min, f) => Math.min(min, f.price.total), Number.POSITIVE_INFINITY) !== Number.POSITIVE_INFINITY ?
+                    (searchResults?.flights || []).reduce((min, f) => Math.min(min, f.price.total), Number.POSITIVE_INFINITY) : undefined}
+                  departureDate={currentSearchParams.departureDate}
+                  className="mb-8"
+                />
+              )}
 
               {/* Price Analysis (Real-time only) */}
               {realtimeResults?.data.priceAnalysis && (

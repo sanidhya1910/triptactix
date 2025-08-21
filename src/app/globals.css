@@ -44,8 +44,22 @@ h1, h2, h3, h4, h5, h6, p, figure {
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-inter), 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: var(--font-poppins), 'Poppins', system-ui, -apple-system, sans-serif;
   font-size: 16px;
   line-height: 1.5;
   -webkit-text-size-adjust: 100%;
+}
+
+/* Hero text alignment tweaks to avoid unintended left indent */
+.hero-container {
+  margin-left: auto;
+  margin-right: auto;
+  text-align: center;
+}
+
+.hero-subtext {
+  margin-left: auto;
+  margin-right: auto;
+  max-width: 48rem; /* ~768px */
+  text-align: center;
 }

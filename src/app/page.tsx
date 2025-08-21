@@ -17,7 +17,7 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-white">
       {/* Navigation */}
-      <nav className="fixed top-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-md border-b border-neutral-200">
+  <nav className="fixed top-0 left-0 right-0 z-50 bg-white/40 supports-[backdrop-filter]:bg-white/25 backdrop-blur-xl border-b border-white/20 shadow-lg shadow-black/5">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <Link href="/" className="text-2xl font-bold text-black">
@@ -30,6 +30,9 @@ export default function HomePage() {
               </Link>
               <Link href="/itinerary" className="text-neutral-600 hover:text-black transition-colors">
                 AI Planner
+              </Link>
+              <Link href="/ml-dashboard" className="text-neutral-600 hover:text-black transition-colors">
+                ML Analytics
               </Link>
               <Link href="/dashboard" className="text-neutral-600 hover:text-black transition-colors">
                 Dashboard
@@ -51,38 +54,52 @@ export default function HomePage() {
         </div>
       </nav>
 
-      {/* Hero Section */}
-      <section className="pt-24 pb-20 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-4xl mx-auto text-center">
-          <div className="inline-flex items-center gap-2 bg-neutral-100 px-4 py-2 rounded-full text-sm text-neutral-700 mb-8">
-            <SparklesIcon className="w-4 h-4" />
-            AI-Powered Travel Planning
-          </div>
-          
-          <h1 className="text-5xl md:text-6xl lg:text-7xl font-bold text-black mb-8 leading-tight">
-            Plan Your Perfect
-            <br />
-            <span className="text-neutral-600">Journey</span>
-          </h1>
-          
-          <p className="text-xl text-neutral-600 mb-12 max-w-2xl mx-auto leading-relaxed">
-            Discover personalized travel experiences with AI-powered itinerary planning, 
-            real-time price comparisons, and seamless booking.
-          </p>
-          
-          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-            <Button size="lg" className="px-8 py-4 text-lg" asChild>
-              <Link href="/itinerary" className="flex items-center gap-2">
-                Start Planning
-                <ArrowRightIcon className="w-5 h-5" />
-              </Link>
-            </Button>
-            
-            <Button variant="outline" size="lg" className="px-8 py-4 text-lg" asChild>
-              <Link href="/search">
-                Search Flights
-              </Link>
-            </Button>
+      {/* Hero Section - full screen with no horizontal padding */}
+      <section className="pt-18 pb-8 px-2">
+        <div className="w-full">
+          <div className="relative rounded-3xl overflow-hidden ring-1 ring-neutral-200 min-h-[calc(102vh-7rem)]">
+            {/* Background image */}
+            <div
+              className="absolute inset-0 bg-cover bg-center"
+              style={{ backgroundImage: "url('/hero.jpg')" }}
+            />
+            {/* Subtle overlay for readability (doesn't change text content) */}
+            <div className="absolute inset-0 bg-white/25" />
+            {/* Content */}
+            <div className="relative z-10 flex items-center justify-center h-full">
+              <div className="max-w-5xl mx-auto text-center hero-container py-2 px-4 sm:px-6 md:px-8">
+                <div className="inline-flex items-center gap-2 bg-neutral-100 px-4 py-2 rounded-full text-sm text-neutral-700 mb-8">
+                  <SparklesIcon className="py w-4 h-4" />
+                  AI-Powered Travel Planning
+                </div>
+                
+                <h1 className="text-6xl md:text-7xl lg:text-8xl font-semibold text-black mb-8 leading-tight tracking-tight">
+                  Plan Your Perfect
+                  <br />
+                  <span className="text-neutral-600">Journey</span>
+                </h1>
+                
+                <p className="text-xl md:text-2xl text-neutral-600 mb-12 hero-subtext leading-relaxed">
+                  Discover personalized travel experiences with AI-powered itinerary planning, 
+                  real-time price comparisons, and seamless booking.
+                </p>
+                
+                <div className="py-8 flex flex-col sm:flex-row gap-4 justify-center items-center">
+                  <Button size="lg" className="px-8 py-4 text-lg" asChild>
+                    <Link href="/itinerary" className="flex items-center gap-2">
+                      Start Planning
+                      <ArrowRightIcon className="w-5 h-5" />
+                    </Link>
+                  </Button>
+                  
+                  <Button variant="outline" size="lg" className="px-8 py-4 text-lg" asChild>
+                    <Link href="/search">
+                      Search Flights
+                    </Link>
+                  </Button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -138,20 +155,20 @@ export default function HomePage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
             <div>
-              <div className="text-4xl font-bold text-black mb-2">100K+</div>
-              <div className="text-neutral-600">Happy Travelers</div>
+              <div className="text-4xl font-bold text-black mb-2">0.8s</div>
+              <div className="text-neutral-600">Latency</div>
             </div>
             <div>
-              <div className="text-4xl font-bold text-black mb-2">500+</div>
+              <div className="text-4xl font-bold text-black mb-2">6</div>
               <div className="text-neutral-600">Destinations</div>
             </div>
             <div>
-              <div className="text-4xl font-bold text-black mb-2">50K+</div>
-              <div className="text-neutral-600">Trips Planned</div>
+              <div className="text-4xl font-bold text-black mb-2">30K+</div>
+              <div className="text-neutral-600">Dataset Size</div>
             </div>
             <div>
               <div className="text-4xl font-bold text-black mb-2">98%</div>
-              <div className="text-neutral-600">Satisfaction</div>
+              <div className="text-neutral-600">Confidence upto</div>
             </div>
           </div>
         </div>

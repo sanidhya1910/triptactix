@@ -125,10 +125,20 @@ export default function SearchForm({ onSearch, loading = false }: SearchFormProp
         </div>
         
         {useMLPredictions && (
-          <div className="text-center p-3 bg-blue-50 border border-blue-200 rounded-xl">
-            <p className="text-sm text-blue-800">
-              <strong>ML Predictions enabled:</strong> Get AI-powered price forecasts, savings recommendations, and price trend analysis.
-            </p>
+          <div className="space-y-3">
+            <div className="text-center p-3 bg-blue-50 border border-blue-200 rounded-xl">
+              <p className="text-sm text-blue-800">
+                <strong>ML Predictions enabled:</strong> Get AI-powered price forecasts, savings recommendations, and price trend analysis.
+              </p>
+            </div>
+            <div className="text-center p-3 bg-amber-50 border border-amber-200 rounded-xl">
+              <p className="text-sm text-amber-800">
+                <strong>Available Cities:</strong> Delhi, Mumbai, Bangalore, Chennai, Hyderabad, Kolkata
+              </p>
+              <p className="text-xs text-amber-700 mt-1">
+                ML predictions are available for flights between these 6 Indian cities from our 300K+ flight dataset.
+              </p>
+            </div>
           </div>
         )}
       </CardHeader>
@@ -143,6 +153,7 @@ export default function SearchForm({ onSearch, loading = false }: SearchFormProp
                 value={originCity?.name || ''}
                 onChange={(city, inputValue) => setOriginCity(city)}
                 placeholder="Select origin city"
+                mlMode={useMLPredictions}
               />
             </div>
             <div className="space-y-2">
@@ -151,6 +162,7 @@ export default function SearchForm({ onSearch, loading = false }: SearchFormProp
                 value={destinationCity?.name || ''}
                 onChange={(city, inputValue) => setDestinationCity(city)}
                 placeholder="Select destination city"
+                mlMode={useMLPredictions}
               />
             </div>
           </div>
