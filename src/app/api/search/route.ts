@@ -6,6 +6,7 @@ import { RealtimeFlightService } from '@/lib/realtime-flights';
 import { mlService } from '@/lib/ml-service';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 const searchSchema = z.object({
   origin: z.object({
@@ -101,39 +102,59 @@ async function searchFlights(params: SearchParams & { useMLPredictions?: boolean
       // Compute route-level predicted price using Python ML API for consistency with analysis card
       let pythonPredicted: number | undefined;
       try {
-        const normalizeCity = (c: string) => {
-          const map: Record<string, string> = {
-            'New Delhi': 'Delhi',
-            'Bombay': 'Mumbai',
-            'Calcutta': 'Kolkata',
-            'Madras': 'Chennai',
-            'Bengaluru': 'Bangalore',
+        // ML prediction integration - skip during build to avoid ECONNRESET
+      let pythonPredicted = null;
+      try {
+        // Skip ML API calls during build process
+        if (!process.env.NEXT_BUILD && process.env.NODE_ENV !== 'test' && typeof window === 'undefined') {
+          const normalizeCity = (c: string): string => {
+            const map: Record<string, string> = {
+              'Mumbai': 'Mumbai',
+              'Bombay': 'Mumbai', 
+              'Bengaluru': 'Bangalore',
+            };
+            return map[c] || c;
           };
-          return map[c] || c;
-        };
-        const src = normalizeCity(params.origin.city);
-        const dst = normalizeCity(params.destination.city);
-        const routeMinPrice = Math.min(...serpFlights.map(f => f.price.total));
-        const resp = await fetch('http://localhost:8000/analyze-price', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            source_city: src,
-            destination_city: dst,
-            current_price: isFinite(routeMinPrice) ? routeMinPrice : 15000,
-            departure_date: formatDate(params.departureDate)
-          })
-        });
-        if (resp.ok) {
-          const data = await resp.json();
-          if (data?.success && data?.analysis?.current_vs_predicted?.predicted_price) {
-            pythonPredicted = data.analysis.current_vs_predicted.predicted_price;
+          const src = normalizeCity(params.origin.city);
+          const dst = normalizeCity(params.destination.city);
+          const routeMinPrice = Math.min(...serpFlights.map(f => f.price.total));
+          
+          // Only make network calls in actual runtime, not build
+          const isRuntimeEnvironment = process.env.NODE_ENV === 'development' || 
+                                     (process.env.NODE_ENV === 'production' && typeof process !== 'undefined' && process.pid);
+          
+          if (isRuntimeEnvironment) {
+            try {
+              const resp = await fetch('http://localhost:8000/analyze-price', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  source_city: src,
+                  destination_city: dst,
+                  current_price: isFinite(routeMinPrice) ? routeMinPrice : 15000,
+                  departure_date: formatDate(params.departureDate)
+                }),
+                signal: AbortSignal.timeout(5000) // 5 second timeout
+              });
+              if (resp.ok) {
+                const data = await resp.json();
+                if (data?.success && data?.analysis?.current_vs_predicted?.predicted_price) {
+                  pythonPredicted = data.analysis.current_vs_predicted.predicted_price;
+                }
+              } else {
+                console.warn('Python analyze-price returned non-OK status');
+              }
+            } catch (fetchError) {
+              // Handle network errors gracefully during build
+              console.warn('Python analyze-price call failed during build/runtime:', fetchError instanceof Error ? fetchError.message : fetchError);
+            }
           }
-        } else {
-          console.warn('Python analyze-price returned non-OK status');
         }
-      } catch (e) {
-        console.warn('Python analyze-price call failed:', e);
+      } catch (mlApiError) {
+        console.warn('ML price prediction failed:', mlApiError);
+      }
+      } catch (mlApiError) {
+        console.warn('ML price prediction failed:', mlApiError);
       }
 
       // Enhance flights with ML insights

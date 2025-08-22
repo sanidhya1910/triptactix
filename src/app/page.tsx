@@ -12,47 +12,12 @@ import {
   ChartBarIcon
 } from '@heroicons/react/24/outline';
 import { Button } from '@/components/ui/button';
+import { Navbar } from '@/components/layout/Navbar';
 
 export default function HomePage() {
   return (
     <div className="min-h-screen bg-white">
-      {/* Navigation */}
-  <nav className="fixed top-0 left-0 right-0 z-50 bg-white/40 supports-[backdrop-filter]:bg-white/25 backdrop-blur-xl border-b border-white/20 shadow-lg shadow-black/5">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <Link href="/" className="text-2xl font-bold text-black">
-              Triptactix
-            </Link>
-            
-            <div className="hidden md:flex items-center space-x-8">
-              <Link href="/search" className="text-neutral-600 hover:text-black transition-colors">
-                Search
-              </Link>
-              <Link href="/itinerary" className="text-neutral-600 hover:text-black transition-colors">
-                AI Planner
-              </Link>
-              <Link href="/ml-dashboard" className="text-neutral-600 hover:text-black transition-colors">
-                ML Analytics
-              </Link>
-              <Link href="/dashboard" className="text-neutral-600 hover:text-black transition-colors">
-                Dashboard
-              </Link>
-              <Button asChild>
-                <Link href="/search">
-                  Get Started
-                </Link>
-              </Button>
-            </div>
-            
-            {/* Mobile menu button */}
-            <div className="md:hidden">
-              <Button variant="ghost" size="sm">
-                Menu
-              </Button>
-            </div>
-          </div>
-        </div>
-      </nav>
+      <Navbar currentPage="home" />
 
       {/* Hero Section - full screen with no horizontal padding */}
       <section className="pt-18 pb-8 px-2">
@@ -79,12 +44,12 @@ export default function HomePage() {
                   <span className="text-neutral-600">Journey</span>
                 </h1>
                 
-                <p className="text-xl md:text-2xl text-neutral-600 mb-12 hero-subtext leading-relaxed">
+                <p className="text-xl md:text-2xl text-neutral-600 mb-12 hero-subtext leading-relaxed py-36">
                   Discover personalized travel experiences with AI-powered itinerary planning, 
                   real-time price comparisons, and seamless booking.
                 </p>
                 
-                <div className="py-8 flex flex-col sm:flex-row gap-4 justify-center items-center">
+                <div className="py-4 flex flex-col sm:flex-row gap-4 justify-center items-center">
                   <Button size="lg" className="px-8 py-4 text-lg" asChild>
                     <Link href="/itinerary" className="flex items-center gap-2">
                       Start Planning
@@ -108,10 +73,10 @@ export default function HomePage() {
       <section className="py-20 bg-neutral-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-bold text-black mb-6">
+            <h2 className="text-3xl md:text-4xl font-bold text-black mb-6 text-center">
               Everything You Need for Travel
             </h2>
-            <p className="text-xl text-neutral-600 max-w-2xl mx-auto">
+            <p className="text-xl text-neutral-600 max-w-2xl mx-auto text-center">
               Our platform combines intelligent planning with comprehensive booking tools.
             </p>
           </div>

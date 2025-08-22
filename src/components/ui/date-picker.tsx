@@ -77,14 +77,13 @@ export function DatePicker({
         </PopoverTrigger>
         <PopoverContent className="w-auto p-0" align="start">
           <Calendar
-            mode="single"
-            selected={date}
-            onSelect={(selectedDate) => {
-              onDateChange?.(selectedDate)
+            value={date}
+            onChange={(selectedDate) => {
+              onDateChange?.(selectedDate || undefined)
               setIsOpen(false)
             }}
-            disabled={defaultDisabledDates}
-            initialFocus
+            minDate={minDate}
+            maxDate={maxDate}
             className="rounded-md border-0"
           />
         </PopoverContent>

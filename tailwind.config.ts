@@ -103,9 +103,10 @@ const config: Config = {
         'card-gradient': 'linear-gradient(145deg, #ffffff 0%, #fafafa 100%)',
       },
       fontFamily: {
-        sans: ['var(--font-inter)', 'Inter', 'system-ui', 'sans-serif'],
-        display: ['var(--font-inter)', 'Inter', 'system-ui', 'sans-serif'],
-        heading: ['var(--font-inter)', 'Inter', 'system-ui', 'sans-serif'],
+        sans: ['system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
+        display: ['system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
+        heading: ['system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
+        mono: ['ui-monospace', 'SFMono-Regular', 'Monaco', 'Consolas', 'Liberation Mono', 'Courier New', 'monospace'],
       },
       fontSize: {
         'radix-xl': ['48px', { lineHeight: '1.2em', fontWeight: '600' }],

@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { PricePrediction, PriceHistory } from '@/types/travel';
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 const predictionSchema = z.object({
   searchId: z.string(),
   origin: z.string(),

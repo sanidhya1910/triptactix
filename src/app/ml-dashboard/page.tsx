@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { DatePicker } from '@/components/ui/date-picker';
 import { format } from 'date-fns';
 import { PricePredictionCard, RouteAnalyticsCard } from '@/components/charts/MLInsightsCard';
+import { Navbar } from '@/components/layout/Navbar';
 
 interface DashboardInsights {
   totalRoutes: number;
@@ -123,34 +124,7 @@ export default function MLDashboard() {
 
   return (
     <div className="min-h-screen bg-neutral-50">
-      {/* Navigation */}
-      <nav className="fixed top-0 left-0 right-0 z-50 bg-white/40 supports-[backdrop-filter]:bg-white/25 backdrop-blur-xl border-b border-white/20 shadow-lg shadow-black/5">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <a href="/" className="text-2xl font-bold text-black">
-              Triptactix
-            </a>
-            
-            <div className="hidden md:flex items-center space-x-8">
-              <a href="/" className="text-neutral-600 hover:text-black transition-colors">
-                Home
-              </a>
-              <a href="/search" className="text-neutral-600 hover:text-black transition-colors">
-                Search
-              </a>
-              <a href="/itinerary" className="text-neutral-600 hover:text-black transition-colors">
-                AI Planner
-              </a>
-              <a href="/ml-dashboard" className="text-black font-semibold">
-                ML Analytics
-              </a>
-              <a href="/dashboard" className="text-neutral-600 hover:text-black transition-colors">
-                Dashboard
-              </a>
-            </div>
-          </div>
-        </div>
-      </nav>
+      <Navbar currentPage="ml-dashboard" showGetStarted={false} />
     
     <div className="max-w-7xl mx-auto p-6 space-y-6 pt-24">
       <div className="text-center mb-8">

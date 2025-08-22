@@ -24,7 +24,11 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://your-domain.com"],
+    allow_origins=[
+        "http://localhost:3000", 
+        "http://localhost:3001", 
+        "https://your-domain.com"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -338,6 +342,11 @@ class PriceAnalysisRequest(BaseModel):
     source_city: str
     destination_city: str
     departure_date: str
+
+@app.options("/price-trend")
+async def price_trend_options():
+    """Handle CORS preflight for price-trend endpoint"""
+    return {"message": "OK"}
 
 @app.post("/price-trend")
 async def get_price_trend(request: PriceTrendRequest):

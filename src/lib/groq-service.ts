@@ -100,9 +100,20 @@ export interface GeneratedItinerary {
   };
 }
 
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY
-});
+// Initialize Groq client only when needed (not during build)
+let groq: Groq | null = null;
+
+function getGroqClient(): Groq {
+  if (!groq && process.env.GROQ_API_KEY) {
+    groq = new Groq({
+      apiKey: process.env.GROQ_API_KEY
+    });
+  }
+  if (!groq) {
+    throw new Error('Groq client not available - API key missing');
+  }
+  return groq;
+}
 
 export class GroqItineraryService {
   // Rate limiting tracking
@@ -125,7 +136,7 @@ export class GroqItineraryService {
       // Update rate limiting counters
       this.updateRequestCounters();
       
-      const completion = await groq.chat.completions.create({
+      const completion = await getGroqClient().chat.completions.create({
         messages: [
           {
             role: "system",

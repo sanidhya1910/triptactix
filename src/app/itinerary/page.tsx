@@ -9,6 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { DatePicker } from '@/components/ui/date-picker';
 import { format } from 'date-fns';
+import { Navbar } from '@/components/layout/Navbar';
 import { 
   SparklesIcon,
   MapPinIcon,
@@ -264,24 +265,7 @@ export default function EnhancedItineraryPage() {
 
   return (
     <div className="min-h-screen bg-white">
-      {/* Navigation */}
-      <nav className="fixed top-0 left-0 right-0 z-50 bg-white/40 supports-[backdrop-filter]:bg-white/25 backdrop-blur-xl border-b border-white/20 shadow-lg shadow-black/5">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <a href="/" className="text-2xl font-bold text-black">
-              Triptactix
-            </a>
-            
-            <div className="hidden md:flex items-center space-x-8">
-              <a href="/" className="text-neutral-600 hover:text-black transition-colors">Home</a>
-              <a href="/search" className="text-neutral-600 hover:text-black transition-colors">Search</a>
-              <a href="/itinerary" className="text-black font-semibold">AI Planner</a>
-              <a href="/ml-dashboard" className="text-neutral-600 hover:text-black transition-colors">ML Analytics</a>
-              <a href="/dashboard" className="text-neutral-600 hover:text-black transition-colors">Dashboard</a>
-            </div>
-          </div>
-        </div>
-      </nav>
+      <Navbar currentPage="itinerary" showGetStarted={false} />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 pt-24">
         {!hasItinerary ? (
