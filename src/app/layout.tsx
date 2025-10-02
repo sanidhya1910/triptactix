@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { fontClassNames } from "@/lib/fonts";
+import ClientWrapper from "@/components/client-wrapper";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -15,7 +16,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={fontClassNames}>
-        {children}
+        <ClientWrapper>
+          {children}
+        </ClientWrapper>
       </body>
     </html>
   );

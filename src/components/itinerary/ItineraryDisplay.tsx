@@ -5,7 +5,6 @@ import { type Itinerary, type ItineraryDay, type Activity } from '@/types/itiner
 import { 
   CalendarDaysIcon, 
   MapPinIcon, 
-  CurrencyDollarIcon,
   ClockIcon,
   StarIcon,
   ChevronDownIcon,
@@ -16,7 +15,16 @@ import {
   PaperAirplaneIcon
 } from '@heroicons/react/24/outline';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import React from 'react';
+
+const currencyFormatter = new Intl.NumberFormat('en-IN', {
+  style: 'currency',
+  currency: 'INR',
+  maximumFractionDigits: 0,
+});
+
+type ItineraryTab = 'overview' | 'daily' | 'tips';
 
 interface ItineraryDisplayProps {
   itinerary: Itinerary;
@@ -25,7 +33,13 @@ interface ItineraryDisplayProps {
 
 export function ItineraryDisplay({ itinerary, onBookNow }: ItineraryDisplayProps) {
   const [expandedDays, setExpandedDays] = useState<Set<number>>(new Set([1]));
-  const [activeTab, setActiveTab] = useState<'overview' | 'daily' | 'tips'>('overview');
+  const [activeTab, setActiveTab] = useState<ItineraryTab>('overview');
+
+  const tabs: Array<{ id: ItineraryTab; label: string; icon: typeof StarIcon }> = [
+    { id: 'overview', label: 'Overview', icon: StarIcon },
+    { id: 'daily', label: 'Daily Plan', icon: CalendarDaysIcon },
+    { id: 'tips', label: 'Tips & Info', icon: MapPinIcon },
+  ];
 
   const toggleDay = (dayNumber: number) => {
     const newExpanded = new Set(expandedDays);
@@ -84,14 +98,10 @@ export function ItineraryDisplay({ itinerary, onBookNow }: ItineraryDisplayProps
       {/* Navigation Tabs */}
       <div className="border-b-2 border-neutral-900 bg-neutral-50">
         <div className="flex">
-          {[
-            { id: 'overview', label: 'Overview', icon: StarIcon },
-            { id: 'daily', label: 'Daily Plan', icon: CalendarDaysIcon },
-            { id: 'tips', label: 'Tips & Info', icon: MapPinIcon },
-          ].map((tab) => (
+          {tabs.map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)}
+              onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-2 px-6 py-3 font-bold transition-colors border-2 border-transparent relative overflow-hidden ${
                 activeTab === tab.id
                   ? 'bg-blue-600 text-white border-2 border-blue-600 shadow-lg'
@@ -420,18 +430,46 @@ function DayCard({ day, isExpanded, onToggle, getTimeIcon, getCategoryIcon }: Da
           {day.accommodation && (
             <div>
               <h4 className="font-black text-neutral-900 mb-3">Accommodation</h4>
-              <div className="p-3 bg-white rounded-lg border-2 border-neutral-900">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-black text-neutral-900">{day.accommodation.name}</span>
-                  <span className="text-sm font-black text-primary-600">
-                    ₹{day.accommodation.cost}/night
+              <div className="p-4 bg-white rounded-lg border-2 border-neutral-900">
+                <div className="flex flex-col gap-1 mb-2">
+                  <span className="font-black text-neutral-900 text-base">{day.accommodation.name}</span>
+                  <p className="text-sm text-neutral-900 font-bold">{day.accommodation.location}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3 text-sm font-black text-neutral-900 mb-2">
+                  <span className="text-primary-600">
+                    {currencyFormatter.format(day.accommodation.nightlyRate ?? day.accommodation.cost)}
+                    <span className="text-xs font-bold text-neutral-600 ml-1">per night</span>
                   </span>
+                  {day.accommodation.totalPrice && (
+                    <span className="text-primary-600">
+                      {currencyFormatter.format(day.accommodation.totalPrice)}
+                      <span className="text-xs font-bold text-neutral-600 ml-1">
+                        total{day.accommodation.nights ? ` • ${day.accommodation.nights} nights` : ''}
+                      </span>
+                    </span>
+                  )}
+                  {day.accommodation.rating && (
+                    <span className="flex items-center gap-1 text-yellow-600">
+                      <StarIcon className="w-4 h-4" />
+                      <span className="text-sm font-black text-neutral-900">
+                        {day.accommodation.rating?.toFixed ? day.accommodation.rating.toFixed(1) : day.accommodation.rating}
+                      </span>
+                    </span>
+                  )}
                 </div>
-                <p className="text-sm text-neutral-900 font-bold">{day.accommodation.location}</p>
-                <div className="flex items-center gap-2 mt-1">
-                  <StarIcon className="w-4 h-4 text-yellow-500" />
-                  <span className="text-sm text-neutral-900 font-bold">{day.accommodation.rating}</span>
-                </div>
+                {day.accommodation.amenities && day.accommodation.amenities.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {day.accommodation.amenities.map((amenity, index) => (
+                      <Badge
+                        key={index}
+                        variant="outline"
+                        className="border-neutral-900 text-neutral-900 bg-neutral-50 capitalize"
+                      >
+                        {amenity}
+                      </Badge>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}

@@ -4,6 +4,7 @@ import { SearchParams, SearchResults, Flight, Train } from '@/types/travel';
 import { SerpAPIService } from '@/lib/serpapi-service';
 import { RealtimeFlightService } from '@/lib/realtime-flights';
 import { mlService } from '@/lib/ml-service';
+import { callMLAPI, NetworkError } from '@/lib/resilient-fetch';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -57,8 +58,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Handle network errors specifically
+    if (error instanceof NetworkError) {
+      console.warn(`Network error (${error.code}): ${error.message}`);
+      return NextResponse.json(
+        { success: false, error: 'External services temporarily unavailable', code: error.code },
+        { status: 503 }
+      );
+    }
+    
+    if (error && typeof error === 'object' && 'code' in error) {
+      const networkError = error as { code: string; message?: string };
+      if (networkError.code === 'ECONNRESET' || networkError.code === 'ETIMEDOUT' || networkError.code === 'ECONNREFUSED') {
+        console.warn(`Network error (${networkError.code}): External service unavailable`);
+        return NextResponse.json(
+          { success: false, error: 'External services temporarily unavailable', code: networkError.code },
+          { status: 503 }
+        );
+      }
+    }
+
     return NextResponse.json(
-      { success: false, error: 'Search failed' },
+      { success: false, error: 'Search failed', details: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 }
     );
   }
@@ -125,28 +146,25 @@ async function searchFlights(params: SearchParams & { useMLPredictions?: boolean
           
           if (isRuntimeEnvironment) {
             try {
-              const resp = await fetch('http://localhost:8000/analyze-price', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  source_city: src,
-                  destination_city: dst,
-                  current_price: isFinite(routeMinPrice) ? routeMinPrice : 15000,
-                  departure_date: formatDate(params.departureDate)
-                }),
-                signal: AbortSignal.timeout(5000) // 5 second timeout
+              const mlResult = await callMLAPI<any>('/analyze-price', {
+                source_city: src,
+                destination_city: dst,
+                current_price: isFinite(routeMinPrice) ? routeMinPrice : 15000,
+                departure_date: formatDate(params.departureDate)
+              }, {
+                maxRetries: 2,
+                timeout: 3000
               });
-              if (resp.ok) {
-                const data = await resp.json();
-                if (data?.success && data?.analysis?.current_vs_predicted?.predicted_price) {
-                  pythonPredicted = data.analysis.current_vs_predicted.predicted_price;
-                }
-              } else {
-                console.warn('Python analyze-price returned non-OK status');
+              
+              if (mlResult?.success && mlResult?.analysis?.current_vs_predicted?.predicted_price) {
+                pythonPredicted = mlResult.analysis.current_vs_predicted.predicted_price;
               }
-            } catch (fetchError) {
-              // Handle network errors gracefully during build
-              console.warn('Python analyze-price call failed during build/runtime:', fetchError instanceof Error ? fetchError.message : fetchError);
+            } catch (error) {
+              if (error instanceof NetworkError) {
+                console.warn(`ML API network error (${error.code}): ${error.message}`);
+              } else {
+                console.warn('ML API call failed:', error instanceof Error ? error.message : error);
+              }
             }
           }
         }

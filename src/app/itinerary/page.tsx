@@ -1,8 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -27,13 +26,12 @@ import {
   PaperAirplaneIcon,
   GlobeAltIcon,
   FireIcon,
-  SunIcon,
-  MoonIcon
+  ExclamationTriangleIcon
 } from '@heroicons/react/24/outline';
 import CityAutocomplete from '@/components/ui/CityAutocomplete';
 import { City } from '@/lib/cities';
 import { motion, AnimatePresence } from 'framer-motion';
-import { GeneratedItinerary } from '@/lib/groq-service';
+import { GeneratedItinerary } from '@/lib/perplexity-service';
 
 interface ItineraryFormData {
   destination: string;
@@ -51,10 +49,43 @@ interface ItineraryFormData {
   dietaryRestrictions: string[];
 }
 
+interface ItineraryMeta {
+  realPricing?: {
+    flightPrices?: string;
+    hotelPrices?: string;
+  };
+  generatedAt?: string;
+  source?: string;
+  fallbackReason?: string | null;
+  isFallback?: boolean;
+}
+
+type TravelerRules = {
+  minTravelers: number;
+  lockedValue?: number;
+  isLocked: boolean;
+};
+
+const TRAVELER_OPTION_RANGE = Array.from({ length: 10 }, (_, index) => index + 1);
+
+const getGroupTravelerRules = (groupType: ItineraryFormData['groupType']): TravelerRules => {
+  switch (groupType) {
+    case 'solo':
+      return { minTravelers: 1, lockedValue: 1, isLocked: true };
+    case 'couple':
+      return { minTravelers: 2, lockedValue: 2, isLocked: true };
+    case 'family':
+      return { minTravelers: 3, isLocked: false };
+    default:
+      return { minTravelers: 1, isLocked: false };
+  }
+};
+
 export default function EnhancedItineraryPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [hasItinerary, setHasItinerary] = useState(false);
   const [generatedItinerary, setGeneratedItinerary] = useState<GeneratedItinerary | null>(null);
+  const [itineraryMeta, setItineraryMeta] = useState<ItineraryMeta | null>(null);
   const [sourceCity, setSourceCity] = useState<City | null>(null);
   const [destinationCity, setDestinationCity] = useState<City | null>(null);
   const [startDate, setStartDate] = useState<Date | undefined>(undefined);
@@ -76,6 +107,19 @@ export default function EnhancedItineraryPage() {
     dietaryRestrictions: []
   });
 
+  const today = useMemo(() => {
+    const current = new Date();
+    current.setHours(0, 0, 0, 0);
+    return current;
+  }, []);
+
+  const travelerRules = useMemo(() => getGroupTravelerRules(formData.groupType), [formData.groupType]);
+
+  const travelerOptions = useMemo(() => {
+    const baseOptions = TRAVELER_OPTION_RANGE.filter((value) => value >= travelerRules.minTravelers);
+    return travelerRules.lockedValue ? [travelerRules.lockedValue] : baseOptions;
+  }, [travelerRules]);
+
   const interests = [
     'Historical Sites', 'Food & Cuisine', 'Adventure Sports', 'Beach Activities', 
     'Shopping', 'Photography', 'Nightlife', 'Nature & Wildlife', 'Art & Culture', 
@@ -85,6 +129,47 @@ export default function EnhancedItineraryPage() {
   const dietaryOptions = [
     'Vegetarian', 'Vegan', 'Gluten-Free', 'Halal', 'Kosher', 'Lactose Intolerant', 'Nut Allergy'
   ];
+
+  const calculatedDurationFromForm = formData.startDate && formData.endDate
+    ? Math.max(
+        1,
+        Math.ceil(
+          (new Date(formData.endDate).getTime() - new Date(formData.startDate).getTime()) /
+            (1000 * 60 * 60 * 24)
+        )
+      )
+    : 0;
+
+  const itineraryDuration = generatedItinerary
+    ? generatedItinerary.duration
+        ?? generatedItinerary.days?.length
+        ?? calculatedDurationFromForm
+    : calculatedDurationFromForm;
+
+  const generatedAtLabel = useMemo(() => {
+    if (!itineraryMeta?.generatedAt) {
+      return null;
+    }
+    const parsed = new Date(itineraryMeta.generatedAt);
+    if (Number.isNaN(parsed.getTime())) {
+      return null;
+    }
+    return format(parsed, 'MMM dd, yyyy • HH:mm');
+  }, [itineraryMeta?.generatedAt]);
+
+  const sourceLabel = useMemo(() => {
+    if (!itineraryMeta?.source) {
+      return null;
+    }
+    switch (itineraryMeta.source) {
+      case 'perplexity-ai':
+        return 'Perplexity AI';
+      case 'perplexity-fallback-template':
+        return 'Curated fallback template';
+      default:
+        return itineraryMeta.source;
+    }
+  }, [itineraryMeta?.source]);
 
   const handleInterestToggle = (interest: string) => {
     setFormData(prev => ({
@@ -160,6 +245,13 @@ export default function EnhancedItineraryPage() {
       
       if (result.success) {
         setGeneratedItinerary(result.data.itinerary);
+        setItineraryMeta({
+          realPricing: result.data.realPricing,
+          generatedAt: result.data.generatedAt,
+          source: result.data.source,
+          fallbackReason: result.data.fallbackReason ?? result.data.itinerary?.fallbackReason ?? null,
+          isFallback: result.data.itinerary?.isFallback ?? false
+        });
         setHasItinerary(true);
       } else {
         throw new Error(result.error || 'Failed to generate itinerary');
@@ -176,11 +268,11 @@ export default function EnhancedItineraryPage() {
   const getBudgetInfo = (budget: string) => {
     switch (budget) {
       case 'budget':
-        return { color: 'bg-green-100 text-green-800', range: '₹2,000-4,000/day', icon: '$' };
+        return { color: 'bg-green-100 text-green-800', range: '₹2,000-4,000/day', icon: '₹' };
       case 'mid-range':
-        return { color: 'bg-blue-100 text-blue-800', range: '₹4,000-8,000/day', icon: '$$' };
+        return { color: 'bg-blue-100 text-blue-800', range: '₹4,000-8,000/day', icon: '₹₹' };
       case 'luxury':
-        return { color: 'bg-purple-100 text-purple-800', range: '₹8,000+/day', icon: '$$$' };
+        return { color: 'bg-purple-100 text-purple-800', range: '₹8,000+/day', icon: '₹₹₹' };
       default:
         return { color: 'bg-gray-100 text-gray-800', range: '', icon: '' };
     }
@@ -230,6 +322,13 @@ export default function EnhancedItineraryPage() {
       currency: 'INR',
       maximumFractionDigits: 0,
     }).format(amount);
+  };
+
+  const formatRating = (value?: number) => {
+    if (value === undefined || value === null) {
+      return null;
+    }
+    return value.toFixed(1);
   };
 
   if (isGenerating) {
@@ -325,6 +424,7 @@ export default function EnhancedItineraryPage() {
                         date={startDate}
                         onDateChange={setStartDate}
                         placeholder="Select start date"
+                        minDate={today}
                         className="w-full"
                       />
                     </div>
@@ -338,7 +438,7 @@ export default function EnhancedItineraryPage() {
                         date={endDate}
                         onDateChange={setEndDate}
                         placeholder="Select end date"
-                        minDate={startDate}
+                        minDate={startDate ?? today}
                         className="w-full"
                       />
                     </div>
@@ -384,7 +484,7 @@ export default function EnhancedItineraryPage() {
                                 className="w-full"
                               />
                               <p className="text-xs text-neutral-600 mt-2">
-                                We'll fetch real-time flight prices to include in your budget
+                                We&apos;ll fetch real-time flight prices to include in your budget
                               </p>
                             </div>
                           </motion.div>
@@ -403,9 +503,16 @@ export default function EnhancedItineraryPage() {
                       <select 
                         className="w-full h-12 px-4 border-2 border-gray-300 rounded-lg bg-white text-gray-900 focus:border-black focus:outline-none focus:ring-2 focus:ring-black/10 transition-colors"
                         value={formData.travelers}
-                        onChange={(e) => setFormData(prev => ({ ...prev, travelers: parseInt(e.target.value) }))}
+                        disabled={travelerRules.isLocked}
+                        onChange={(e) => {
+                          const selected = parseInt(e.target.value, 10);
+                          setFormData(prev => ({
+                            ...prev,
+                            travelers: Math.max(selected, travelerRules.minTravelers),
+                          }));
+                        }}
                       >
-                        {[1,2,3,4,5,6,7,8,9,10].map(num => (
+                        {travelerOptions.map(num => (
                           <option key={num} value={num}>{num} {num === 1 ? 'Person' : 'People'}</option>
                         ))}
                       </select>
@@ -449,7 +556,18 @@ export default function EnhancedItineraryPage() {
                       <select 
                         className="w-full h-12 px-4 border-2 border-gray-300 rounded-lg bg-white focus:border-black transition-colors"
                         value={formData.groupType}
-                        onChange={(e) => setFormData(prev => ({ ...prev, groupType: e.target.value as any }))}
+                        onChange={(e) => {
+                          const newGroup = e.target.value as ItineraryFormData['groupType'];
+                          setFormData(prev => {
+                            const rules = getGroupTravelerRules(newGroup);
+                            const nextTravelers = rules.lockedValue ?? Math.max(prev.travelers, rules.minTravelers);
+                            return {
+                              ...prev,
+                              groupType: newGroup,
+                              travelers: nextTravelers,
+                            };
+                          });
+                        }}
                       >
                         <option value="solo">Solo Travel</option>
                         <option value="couple">Couple</option>
@@ -466,7 +584,12 @@ export default function EnhancedItineraryPage() {
                       <select 
                         className="w-full h-12 px-4 border-2 border-gray-300 rounded-lg bg-white focus:border-black transition-colors"
                         value={formData.travelStyle}
-                        onChange={(e) => setFormData(prev => ({ ...prev, travelStyle: e.target.value as any }))}
+                        onChange={(e) =>
+                          setFormData(prev => ({
+                            ...prev,
+                            travelStyle: e.target.value as ItineraryFormData['travelStyle'],
+                          }))
+                        }
                       >
                         <option value="relaxed">Relaxed & Leisure</option>
                         <option value="adventure">Adventure & Active</option>
@@ -483,7 +606,12 @@ export default function EnhancedItineraryPage() {
                       <select 
                         className="w-full h-12 px-4 border-2 border-gray-300 rounded-lg bg-white focus:border-black transition-colors"
                         value={formData.fitnessLevel}
-                        onChange={(e) => setFormData(prev => ({ ...prev, fitnessLevel: e.target.value as any }))}
+                        onChange={(e) =>
+                          setFormData(prev => ({
+                            ...prev,
+                            fitnessLevel: e.target.value as ItineraryFormData['fitnessLevel'],
+                          }))
+                        }
                       >
                         <option value="low">Low (Minimal walking)</option>
                         <option value="moderate">Moderate (Some walking)</option>
@@ -567,11 +695,11 @@ export default function EnhancedItineraryPage() {
           >
             {/* Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between mb-8">
-              <div>
+              <div className="text-center md:text-left">
                 <h1 className="text-4xl font-bold text-black mb-2">
                   Your Perfect Itinerary
                 </h1>
-                <p className="text-neutral-600 text-lg">
+                <p className="text-neutral-600 text-lg text-center md:text-left">
                   {destinationCity?.name} • {startDate && endDate ? `${format(startDate, 'MMM dd')} to ${format(endDate, 'MMM dd')}` : 'Select dates'} • {formData.travelers} travelers
                 </p>
               </div>
@@ -581,6 +709,7 @@ export default function EnhancedItineraryPage() {
                   onClick={() => {
                     setHasItinerary(false);
                     setGeneratedItinerary(null);
+                    setItineraryMeta(null);
                   }}
                   className="border-2 hover:border-black hover:text-black"
                 >
@@ -592,6 +721,20 @@ export default function EnhancedItineraryPage() {
               </div>
             </div>
 
+            {(generatedItinerary?.isFallback || itineraryMeta?.isFallback) && (
+              <div className="mb-8 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                <ExclamationTriangleIcon className="w-6 h-6 text-amber-600 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-amber-800">
+                    Showing curated backup itinerary
+                  </p>
+                  <p className="text-sm text-amber-700 mt-1">
+                    {generatedItinerary?.fallbackReason || itineraryMeta?.fallbackReason || 'Perplexity took too long to respond, so we generated a smart template to keep you moving.'}
+                  </p>
+                </div>
+              </div>
+            )}
+
             {generatedItinerary && (
               <>
                 {/* Trip Summary Cards */}
@@ -601,7 +744,7 @@ export default function EnhancedItineraryPage() {
                       <CalendarDaysIcon className="w-8 h-8 text-black mx-auto mb-3" />
                       <p className="text-sm text-neutral-600 font-medium">Duration</p>
                       <p className="text-2xl font-bold text-black">
-                        {Math.ceil((new Date(formData.endDate).getTime() - new Date(formData.startDate).getTime()) / (1000 * 3600 * 24))} Days
+                        {itineraryDuration || 0} Days
                       </p>
                     </CardContent>
                   </Card>
@@ -611,7 +754,7 @@ export default function EnhancedItineraryPage() {
                       <MapPinIcon className="w-8 h-8 text-black mx-auto mb-3" />
                       <p className="text-sm text-neutral-600 font-medium">Activities</p>
                       <p className="text-2xl font-bold text-black">
-                        {generatedItinerary.days?.reduce((acc: number, day: any) => acc + day.activities.length, 0) || 0}
+                        {generatedItinerary.days?.reduce<number>((acc, day) => acc + day.activities.length, 0) ?? 0}
                       </p>
                     </CardContent>
                   </Card>
@@ -692,8 +835,151 @@ export default function EnhancedItineraryPage() {
                         </div>
                       </div>
                       
-                      <div className="mt-6 p-4 bg-black text-white rounded-lg text-center">
-                        <p className="text-sm">Prices are fetched in real-time from Google Flights & Hotels API</p>
+                      <div className="mt-6 p-4 bg-black text-white rounded-lg text-center space-y-1">
+                        <p className="text-sm font-medium">
+                          {itineraryMeta?.realPricing?.hotelPrices || 'Hotel pricing generated with Perplexity heuristics'}
+                        </p>
+                        {itineraryMeta?.realPricing?.flightPrices && (
+                          <p className="text-xs text-neutral-200">
+                            Flights: {itineraryMeta.realPricing.flightPrices}
+                          </p>
+                        )}
+                        {generatedAtLabel && (
+                          <p className="text-xs text-neutral-200">
+                            Generated {generatedAtLabel}
+                          </p>
+                        )}
+                        {sourceLabel && (
+                          <p className="text-xs uppercase tracking-wide text-neutral-300">
+                            Source: {sourceLabel}
+                          </p>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {generatedItinerary.transportation && (
+                  <Card className="mb-8 border-2 border-neutral-200 bg-white">
+                    <CardHeader className="bg-neutral-50 border-b">
+                      <CardTitle className="flex items-center text-xl">
+                        <PaperAirplaneIcon className="w-6 h-6 mr-2 text-black" />
+                        Transportation Insights
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {generatedItinerary.transportation.flights && (
+                          <div className="p-5 border border-neutral-200 rounded-xl bg-neutral-50">
+                            <h3 className="text-lg font-semibold text-black mb-4 flex items-center gap-2">
+                              <PaperAirplaneIcon className="w-5 h-5" /> Flight Guidance
+                            </h3>
+                            <div className="space-y-3 text-sm text-neutral-700">
+                              <div>
+                                <p className="font-semibold text-neutral-800">Outbound</p>
+                                <p className="text-neutral-600">
+                                  {formatCurrency(generatedItinerary.transportation.flights.outbound.estimatedCost || 0)}
+                                </p>
+                                <ul className="list-disc list-inside mt-1 space-y-1">
+                                  {generatedItinerary.transportation.flights.outbound.tips?.map((tip, tipIndex) => (
+                                    <li key={tipIndex}>{tip}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                              <div>
+                                <p className="font-semibold text-neutral-800">Return</p>
+                                <p className="text-neutral-600">
+                                  {formatCurrency(generatedItinerary.transportation.flights.return.estimatedCost || 0)}
+                                </p>
+                                <ul className="list-disc list-inside mt-1 space-y-1">
+                                  {generatedItinerary.transportation.flights.return.tips?.map((tip, tipIndex) => (
+                                    <li key={`return-tip-${tipIndex}`}>{tip}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="p-5 border border-neutral-200 rounded-xl bg-neutral-50">
+                          <h3 className="text-lg font-semibold text-black mb-4 flex items-center gap-2">
+                            <ArrowRightIcon className="w-5 h-5" /> Local Transport
+                          </h3>
+                          <p className="text-sm text-neutral-700 mb-4">
+                            Estimated Daily Cost: {formatCurrency(generatedItinerary.transportation.local?.estimatedDailyCost || 0)}
+                          </p>
+                          <ul className="list-disc list-inside space-y-2 text-sm text-neutral-700">
+                            {generatedItinerary.transportation.local?.recommendations?.map((rec, recIndex) => (
+                              <li key={recIndex}>{rec}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Hotel Recommendations */}
+                {generatedItinerary.accommodation?.recommendations?.length > 0 && (
+                  <Card className="mb-8 border-2 border-neutral-200 bg-white">
+                    <CardHeader className="bg-neutral-50 border-b">
+                      <CardTitle className="flex items-center text-xl">
+                        <BuildingOfficeIcon className="w-6 h-6 mr-2 text-black" />
+                        Handpicked Stays for You
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {generatedItinerary.accommodation.recommendations.map((hotel, index) => (
+                          <div
+                            key={index}
+                            className="border border-neutral-200 rounded-xl p-5 bg-white shadow-sm hover:shadow-md transition-shadow"
+                          >
+                            <div className="flex items-start justify-between gap-3 mb-3">
+                              <div>
+                                <h3 className="text-lg font-semibold text-black">{hotel.name}</h3>
+                                <p className="text-sm text-neutral-600 font-medium">{hotel.area}</p>
+                              </div>
+                              {hotel.rating && (
+                                <div className="flex items-center gap-1 bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full text-sm font-semibold">
+                                  <StarIcon className="w-4 h-4" />
+                                  <span>{formatRating(hotel.rating)}</span>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-4 text-sm font-semibold text-neutral-700">
+                              <span>
+                                {formatCurrency(hotel.estimatedCostPerNight || hotel.pricePerNight || 0)}
+                                <span className="text-xs text-neutral-500 ml-1">per night</span>
+                              </span>
+                              {hotel.totalPrice && (
+                                <span>
+                                  {formatCurrency(hotel.totalPrice)}
+                                  <span className="text-xs text-neutral-500 ml-1">total</span>
+                                </span>
+                              )}
+                            </div>
+
+                            {hotel.reason && (
+                              <p className="mt-3 text-sm text-neutral-600 leading-relaxed">{hotel.reason}</p>
+                            )}
+
+                            {hotel.amenities && hotel.amenities.length > 0 && (
+                              <div className="flex flex-wrap gap-2 mt-4">
+                                {hotel.amenities.slice(0, 6).map((amenity: string, amenityIndex: number) => (
+                                  <Badge
+                                    key={amenityIndex}
+                                    variant="outline"
+                                    className="border-neutral-300 text-neutral-700 bg-neutral-100 capitalize"
+                                  >
+                                    {amenity}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
                       </div>
                     </CardContent>
                   </Card>
@@ -701,7 +987,7 @@ export default function EnhancedItineraryPage() {
 
                 {/* Daily Itinerary */}
                 <div className="space-y-8">
-                  {generatedItinerary.days?.map((day: any, dayIndex: number) => (
+                  {generatedItinerary.days?.map((day, dayIndex) => (
                     <motion.div
                       key={dayIndex}
                       initial={{ opacity: 0, x: -20 }}
@@ -723,7 +1009,7 @@ export default function EnhancedItineraryPage() {
                         
                         <CardContent className="p-6">
                           <div className="space-y-6">
-                            {day.activities.map((activity: any, activityIndex: number) => (
+                            {day.activities.map((activity, activityIndex) => (
                               <motion.div
                                 key={activityIndex}
                                 initial={{ opacity: 0, y: 10 }}
@@ -783,6 +1069,51 @@ export default function EnhancedItineraryPage() {
                               </motion.div>
                             ))}
                           </div>
+
+                          {day.meals?.length ? (
+                            <div className="mt-8">
+                              <h4 className="text-lg font-semibold text-black mb-4 flex items-center gap-2">
+                                <HeartIcon className="w-5 h-5" /> Meal Highlights
+                              </h4>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {day.meals.map((meal, mealIndex) => (
+                                  <div
+                                    key={mealIndex}
+                                    className="p-4 border border-neutral-200 rounded-xl bg-neutral-50"
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <div>
+                                        <p className="text-sm font-semibold text-neutral-800 uppercase tracking-wide">
+                                          {meal.time}
+                                        </p>
+                                        <h5 className="text-lg font-semibold text-black">
+                                          {meal.restaurant}
+                                        </h5>
+                                      </div>
+                                      <Badge variant="secondary" className="bg-black text-white">
+                                        {formatCurrency(meal.estimatedCost || 0)}
+                                      </Badge>
+                                    </div>
+                                    <p className="text-sm text-neutral-600 mt-2">
+                                      Cuisine: {meal.cuisine}
+                                    </p>
+                                    {meal.speciality && (
+                                      <p className="text-sm text-neutral-500 mt-1">
+                                        Signature: {meal.speciality}
+                                      </p>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ) : null}
+
+                          {typeof day.estimatedDailyCost === 'number' && day.estimatedDailyCost > 0 && (
+                            <div className="mt-8 flex items-center justify-end text-sm text-neutral-600">
+                              <span className="font-medium text-black mr-2">Estimated spend for this day:</span>
+                              {formatCurrency(day.estimatedDailyCost)}
+                            </div>
+                          )}
                         </CardContent>
                       </Card>
                     </motion.div>
@@ -816,6 +1147,39 @@ export default function EnhancedItineraryPage() {
                             <p className="text-neutral-700 text-sm leading-relaxed">{tip}</p>
                           </div>
                         ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {generatedItinerary.bestTimeToVisit && (
+                  <Card className="mt-8 border-2 border-neutral-200 bg-neutral-50">
+                    <CardHeader>
+                      <CardTitle className="flex items-center text-xl">
+                        <CalendarDaysIcon className="w-6 h-6 mr-2 text-black" />
+                        Best Time to Visit Insights
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="p-4 bg-white rounded-lg border border-neutral-200">
+                          <h4 className="text-sm font-semibold text-neutral-600 uppercase tracking-wide">Weather</h4>
+                          <p className="mt-2 text-neutral-700 leading-relaxed">
+                            {generatedItinerary.bestTimeToVisit.weather}
+                          </p>
+                        </div>
+                        <div className="p-4 bg-white rounded-lg border border-neutral-200">
+                          <h4 className="text-sm font-semibold text-neutral-600 uppercase tracking-wide">Crowds</h4>
+                          <p className="mt-2 text-neutral-700 leading-relaxed">
+                            {generatedItinerary.bestTimeToVisit.crowds}
+                          </p>
+                        </div>
+                        <div className="p-4 bg-white rounded-lg border border-neutral-200">
+                          <h4 className="text-sm font-semibold text-neutral-600 uppercase tracking-wide">Prices</h4>
+                          <p className="mt-2 text-neutral-700 leading-relaxed">
+                            {generatedItinerary.bestTimeToVisit.prices}
+                          </p>
+                        </div>
                       </div>
                     </CardContent>
                   </Card>

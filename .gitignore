@@ -57,3 +57,8 @@ python-ml-api/*.pkl
 
 /models
 research-paper.tex
+test-groq.js
+src/lib/groq-service.ts
+src/lib/rapidapi.ts
+.gitignore
+RESEARCH_PAPER_CONTEXT.txt

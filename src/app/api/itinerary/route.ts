@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ItineraryRequestSchema } from '@/types/itinerary';
-import { groqItineraryService } from '@/lib/groq-service';
+import { perplexityItineraryService } from '@/lib/perplexity-service';
 
 export async function POST(request: NextRequest) {
   try {
@@ -18,8 +18,8 @@ export async function POST(request: NextRequest) {
 
     const itineraryRequest = validation.data;
     
-    // Generate itinerary using Groq AI
-    const response = await groqItineraryService.generateItinerary(itineraryRequest);
+  // Generate itinerary using Perplexity AI
+  const response = await perplexityItineraryService.generateItinerary(itineraryRequest);
     
     return NextResponse.json(response);
   } catch (error) {

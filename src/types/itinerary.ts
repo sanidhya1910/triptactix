@@ -60,6 +60,9 @@ export interface Accommodation {
   checkIn: string;
   checkOut: string;
   cost: number;
+  nightlyRate?: number;
+  totalPrice?: number;
+  nights?: number;
   rating?: number;
   amenities?: string[];
   images?: string[];

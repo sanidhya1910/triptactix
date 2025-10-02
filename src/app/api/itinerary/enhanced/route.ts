@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { SerpAPIService } from '@/lib/serpapi-service';
-import { GroqItineraryService, EnhancedItineraryRequest } from '@/lib/groq-service';
+import { PerplexityItineraryService, EnhancedItineraryRequest } from '@/lib/perplexity-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,79 +30,46 @@ export async function POST(request: NextRequest) {
     
     const params = enhancedItinerarySchema.parse(body);
     
-    // Get real flight and hotel pricing if requested
+    // Estimate baseline budgets based on travel style if real pricing is unavailable
     let flightBudget;
-    let hotelBudget;
-    
-    if (params.includeFlight && params.flightSource) {
-      console.log('Fetching real flight prices...');
-      try {
-        const flightPricing = await SerpAPIService.getCheapestFlightPrice(
-          params.flightSource,
-          params.destination,
-          params.startDate,
-          params.endDate,
-          params.travelers
-        );
-        
-        if (flightPricing) {
-          flightBudget = {
-            outbound: Math.round(flightPricing.price * 0.6), // Assume outbound is 60% of total
-            return: Math.round(flightPricing.price * 0.4)    // Return is 40% of total
-          };
-          console.log('Found flight pricing:', flightBudget);
-        }
-      } catch (error) {
-        console.error('Error fetching flight prices:', error);
-        // Continue with estimated prices
-      }
+    if (params.includeFlight) {
+      const roughFlightCost = params.budget === 'luxury' ? 28000 : params.budget === 'mid-range' ? 18000 : 12000;
+      flightBudget = {
+        outbound: Math.round(roughFlightCost * 0.55),
+        return: Math.round(roughFlightCost * 0.45)
+      };
     }
-    
-    // Get real hotel pricing
-    console.log('Fetching real hotel prices...');
-    try {
-      const hotelPricing = await SerpAPIService.getHotelPriceRange(
-        params.destination,
-        params.startDate,
-        params.endDate,
-        params.travelers
-      );
-      
-      if (hotelPricing) {
-        hotelBudget = {
-          budget: hotelPricing.budget,
-          midRange: hotelPricing.midRange,
-          luxury: hotelPricing.luxury
-        };
-        console.log('Found hotel pricing:', hotelBudget);
-      }
-    } catch (error) {
-      console.error('Error fetching hotel prices:', error);
-      // Continue with estimated prices
-    }
-    
-    // Create enhanced request
+
     const enhancedRequest: EnhancedItineraryRequest = {
       ...params,
-      flightBudget,
-      hotelBudget
+      flightBudget
     };
     
-    // Generate itinerary using Groq
-    console.log('Generating enhanced itinerary with Groq...');
-    const groqService = new GroqItineraryService();
-    const itinerary = await groqService.generateEnhancedItinerary(enhancedRequest);
+  // Generate itinerary using Perplexity
+  console.log('Generating enhanced itinerary with Perplexity...');
+  const aiService = new PerplexityItineraryService();
+  const itinerary = await aiService.generateEnhancedItinerary(enhancedRequest);
+
+  const generatedAt = new Date().toISOString();
+  const isFallback = itinerary.isFallback === true;
+  const source = isFallback ? 'perplexity-fallback-template' : 'perplexity-ai';
+  const realPricing = {
+    flightPrices: flightBudget
+      ? (isFallback ? 'Template estimate (fallback itinerary)' : 'Estimated based on budget tier')
+      : 'Not requested',
+    hotelPrices: isFallback
+      ? 'Template estimate (fallback itinerary)'
+      : 'Estimated via Perplexity model'
+  };
     
     return NextResponse.json({
       success: true,
       data: {
         itinerary,
-        realPricing: {
-          flightPrices: flightBudget ? 'Real prices fetched' : 'Estimated prices used',
-          hotelPrices: hotelBudget ? 'Real prices fetched' : 'Estimated prices used'
-        },
-        generatedAt: new Date().toISOString(),
-        source: 'groq-ai-with-real-pricing'
+        realPricing,
+        generatedAt,
+        source,
+        fallbackReason: itinerary.fallbackReason ?? null
       }
     });
     
@@ -142,7 +108,7 @@ export async function GET() {
     features: [
       'Real flight pricing via SerpAPI',
       'Real hotel pricing via Google Hotels',
-      'AI-powered itinerary generation with Groq',
+  'AI-powered itinerary generation with Perplexity',
       'Personalized recommendations based on interests',
       'Budget-aware planning with real market data'
     ]

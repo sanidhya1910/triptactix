@@ -1,10 +1,12 @@
-import Groq from "groq-sdk";
 import { 
   ItineraryRequest, 
   AIItineraryResponse, 
   Itinerary, 
   ItineraryDay 
 } from '@/types/itinerary';
+import { SerpAPIService } from '@/lib/serpapi-service';
+
+const PERPLEXITY_API_URL = 'https://api.perplexity.ai/chat/completions';
 
 export interface EnhancedItineraryRequest extends ItineraryRequest {
   includeFlight: boolean;
@@ -100,27 +102,12 @@ export interface GeneratedItinerary {
   };
 }
 
-// Initialize Groq client only when needed (not during build)
-let groq: Groq | null = null;
-
-function getGroqClient(): Groq {
-  if (!groq && process.env.GROQ_API_KEY) {
-    groq = new Groq({
-      apiKey: process.env.GROQ_API_KEY
-    });
-  }
-  if (!groq) {
-    throw new Error('Groq client not available - API key missing');
-  }
-  return groq;
-}
-
-export class GroqItineraryService {
+export class PerplexityItineraryService {
   // Rate limiting tracking
   private static lastRequestTime = 0;
   private static requestCount = 0;
   private static readonly MIN_REQUEST_INTERVAL = 1000; // 1 second between requests
-  private static readonly MAX_REQUESTS_PER_MINUTE = 30; // Groq has higher limits
+  private static readonly MAX_REQUESTS_PER_MINUTE = 30; // Perplexity safe default
 
   async generateEnhancedItinerary(request: EnhancedItineraryRequest): Promise<GeneratedItinerary> {
     try {
@@ -130,52 +117,83 @@ export class GroqItineraryService {
         return this.generateFallbackItinerary(request);
       }
 
-      const prompt = this.buildEnhancedPrompt(request);
-      console.log('Generating enhanced itinerary with Groq...');
+      // Fetch hotel recommendations using Google Hotels API
+      let hotelRecommendations = null;
+      try {
+        console.log('Fetching hotel recommendations via SerpAPI...');
+        const hotels = await SerpAPIService.searchHotels({
+          destination: request.destination,
+          checkInDate: request.startDate,
+          checkOutDate: request.endDate,
+          adults: request.travelers,
+          currency: 'INR'
+        });
+        
+        // Select top 3-5 hotels based on budget preference
+        if (hotels.length > 0) {
+          const sortedHotels = hotels.sort((a, b) => {
+            // Sort by rating and price based on budget preference
+            if (request.budget === 'budget') {
+              return (a.totalRate?.extractedLowest || 0) - (b.totalRate?.extractedLowest || 0);
+            } else if (request.budget === 'luxury') {
+              return (b.overallRating || 0) - (a.overallRating || 0);
+            } else {
+              // Mid-range: balance price and rating
+              const aScore = ((a.overallRating || 0) * 2) - ((a.totalRate?.extractedLowest || 0) / 1000);
+              const bScore = ((b.overallRating || 0) * 2) - ((b.totalRate?.extractedLowest || 0) / 1000);
+              return bScore - aScore;
+            }
+          });
+          
+          hotelRecommendations = sortedHotels.slice(0, 4).map(hotel => ({
+            name: hotel.name,
+            rating: hotel.overallRating,
+            pricePerNight: hotel.ratePerNight?.extractedLowest || 0,
+            totalPrice: hotel.totalRate?.extractedLowest || 0,
+            location: hotel.nearbyPlaces?.[0]?.name || 'Central location',
+            amenities: hotel.amenities?.slice(0, 3) || [],
+            hotelClass: hotel.extractedHotelClass
+          }));
+          
+          console.log(`Found ${hotelRecommendations.length} hotel recommendations`);
+        }
+      } catch (hotelError) {
+        console.error('Error fetching hotel recommendations:', hotelError);
+        // Continue without hotel data - the AI will provide generic recommendations
+      }
+
+      const prompt = this.buildEnhancedPrompt(request, hotelRecommendations);
+      console.log('Generating enhanced itinerary with Perplexity...');
       
       // Update rate limiting counters
       this.updateRequestCounters();
+
+      const responseText = await this.callPerplexity(prompt);
+      console.log('Raw Perplexity response length:', responseText.length);
       
-      const completion = await getGroqClient().chat.completions.create({
-        messages: [
-          {
-            role: "system",
-            content: "You are an expert travel planner with deep knowledge of destinations worldwide. Always respond with valid JSON format without any additional text or markdown formatting."
-          },
-          {
-            role: "user",
-            content: prompt
-          }
-        ],
-        model: "llama-3.1-8b-instant", // Updated to current available model
-        temperature: 0.7,
-        max_tokens: 4000,
-        top_p: 1,
-        stream: false
-      });
-      
-      const responseText = completion.choices[0]?.message?.content || '';
-      console.log('Raw Groq response length:', responseText.length);
-      
-      // Parse the JSON response
+      // Parse the JSON response with enhanced error handling
       let itinerary;
       try {
         // Try parsing direct JSON first
         itinerary = JSON.parse(responseText);
       } catch (parseError) {
-        // If direct parsing fails, try extracting JSON from markdown or text
-        const jsonMatch = responseText.match(/```(?:json)?\s*([\s\S]*?)\s*```/) || responseText.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-          throw new Error('No valid JSON found in Groq response');
+        console.log('Direct JSON parsing failed, attempting advanced extraction...');
+        
+        try {
+          // Enhanced JSON extraction and cleaning
+          itinerary = this.extractAndCleanJSON(responseText);
+        } catch (extractError) {
+          console.error('Failed to extract valid JSON:', extractError);
+          console.log('Raw response (first 1000 chars):', responseText.substring(0, 1000));
+          console.log('Raw response (around position 5000):', responseText.substring(4900, 5100));
+          throw new Error(`Failed to parse Perplexity response: ${extractError instanceof Error ? extractError.message : 'Unknown error'}`);
         }
-        const jsonString = jsonMatch[1] || jsonMatch[0];
-        itinerary = JSON.parse(jsonString.trim());
       }
       
       return this.validateAndProcessEnhancedItinerary(itinerary, request);
       
     } catch (error) {
-      console.error('Error generating enhanced itinerary with Groq:', error);
+      console.error('Error generating enhanced itinerary with Perplexity:', error);
       
       // Check if it's a rate limit error
       if (this.isRateLimitError(error)) {
@@ -184,26 +202,26 @@ export class GroqItineraryService {
       }
       
       // For other errors, also provide fallback
-      console.log('Groq error occurred, generating fallback itinerary...');
+      console.log('Perplexity error occurred, generating fallback itinerary...');
       return this.generateFallbackItinerary(request);
     }
   }
 
   private canMakeRequest(): boolean {
     const now = Date.now();
-    const timeSinceLastRequest = now - GroqItineraryService.lastRequestTime;
+    const timeSinceLastRequest = now - PerplexityItineraryService.lastRequestTime;
     
     // Reset minute counter if a minute has passed
     if (timeSinceLastRequest > 60000) { // 1 minute
-      GroqItineraryService.requestCount = 0;
+      PerplexityItineraryService.requestCount = 0;
     }
     
     // Check if we've exceeded limits
-    if (GroqItineraryService.requestCount >= GroqItineraryService.MAX_REQUESTS_PER_MINUTE) {
+    if (PerplexityItineraryService.requestCount >= PerplexityItineraryService.MAX_REQUESTS_PER_MINUTE) {
       return false;
     }
     
-    if (timeSinceLastRequest < GroqItineraryService.MIN_REQUEST_INTERVAL) {
+    if (timeSinceLastRequest < PerplexityItineraryService.MIN_REQUEST_INTERVAL) {
       return false;
     }
     
@@ -211,8 +229,8 @@ export class GroqItineraryService {
   }
   
   private updateRequestCounters(): void {
-    GroqItineraryService.lastRequestTime = Date.now();
-    GroqItineraryService.requestCount += 1;
+    PerplexityItineraryService.lastRequestTime = Date.now();
+    PerplexityItineraryService.requestCount += 1;
   }
   
   private isRateLimitError(error: any): boolean {
@@ -223,8 +241,193 @@ export class GroqItineraryService {
            error?.status === 429;
   }
 
-  private buildEnhancedPrompt(request: EnhancedItineraryRequest): string {
-    const duration = Math.ceil((new Date(request.endDate).getTime() - new Date(request.startDate).getTime()) / (1000 * 60 * 60 * 24));
+  private async callPerplexity(prompt: string): Promise<string> {
+    const apiKey = process.env.PERPLEXITY_API_KEY;
+
+    if (!apiKey) {
+      throw new Error('Perplexity API key not configured');
+    }
+
+    const systemPrompt = "You are an expert travel planner. CRITICAL: Your response must be valid JSON only. Do not include any text before or after the JSON. Do not use markdown code blocks. Do not include comments. Ensure all strings are properly quoted and there are no trailing commas. The JSON must be parseable by JSON.parse().";
+
+    const response = await fetch(PERPLEXITY_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'sonar-reasoning-pro',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 4000,
+        top_p: 1
+      })
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      const error = new Error(`Perplexity API error: ${response.status} ${response.statusText} - ${errorBody}`);
+      (error as any).status = response.status;
+      throw error;
+    }
+
+    const data = await response.json();
+    const messageContent = data?.choices?.[0]?.message?.content;
+
+    if (!messageContent) {
+      throw new Error('Perplexity API returned empty response');
+    }
+
+    if (Array.isArray(messageContent)) {
+      return messageContent
+        .map((part: any) => {
+          if (typeof part === 'string') {
+            return part;
+          }
+          if (part?.type === 'output_text' && typeof part?.text === 'string') {
+            return part.text;
+          }
+          if (typeof part?.text === 'string') {
+            return part.text;
+          }
+          if (typeof part?.content === 'string') {
+            return part.content;
+          }
+          return '';
+        })
+        .filter(Boolean)
+        .join('\n')
+        .trim();
+    }
+
+    if (typeof messageContent === 'string') {
+      return messageContent.trim();
+    }
+
+    if (typeof messageContent === 'object' && messageContent !== null) {
+      if (typeof messageContent.text === 'string') {
+        return messageContent.text.trim();
+      }
+      if (Array.isArray(messageContent.text)) {
+        return messageContent.text.join('\n').trim();
+      }
+    }
+
+    return JSON.stringify(messageContent);
+  }
+
+  private extractAndCleanJSON(responseText: string): any {
+    // Step 1: Try extracting JSON from markdown code blocks
+    let jsonText = '';
+    
+    // Look for JSON in markdown code blocks
+    const codeBlockMatch = responseText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (codeBlockMatch) {
+      jsonText = codeBlockMatch[1];
+    } else {
+      // Look for JSON object pattern
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        jsonText = jsonMatch[0];
+      } else {
+        throw new Error('No JSON structure found in response');
+      }
+    }
+
+    // Step 2: Clean the JSON text
+    jsonText = this.cleanJSONString(jsonText);
+
+    // Step 3: Attempt to parse with progressively more aggressive fixes
+    const parseAttempts = [
+      // Original cleaned text
+      jsonText,
+      // Fix common trailing comma issues
+      jsonText.replace(/,(\s*[}\]])/g, '$1'),
+      // Fix missing quotes around keys
+      jsonText.replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":'),
+      // Fix single quotes to double quotes
+      jsonText.replace(/'/g, '"'),
+      // Remove comments
+      jsonText.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, ''),
+    ];
+
+    for (let i = 0; i < parseAttempts.length; i++) {
+      try {
+        return JSON.parse(parseAttempts[i]);
+      } catch (error) {
+        console.log(`Parse attempt ${i + 1} failed:`, error instanceof Error ? error.message : error);
+        if (i === parseAttempts.length - 1) {
+          // Last attempt failed, try more aggressive cleaning
+          return this.tryAggressiveJSONExtraction(responseText);
+        }
+      }
+    }
+
+    throw new Error('All JSON parsing attempts failed');
+  }
+
+  private cleanJSONString(jsonText: string): string {
+    return jsonText
+      .trim()
+      // Remove any leading/trailing non-JSON characters
+      .replace(/^[^{[]*/, '')
+      .replace(/[^}\]]*$/, '')
+      // Fix newlines in strings
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\t/g, '\\t')
+      // Fix escaped quotes that might be causing issues
+      .replace(/\\"/g, '\\"');
+  }
+
+  private tryAggressiveJSONExtraction(responseText: string): any {
+    console.log('Attempting aggressive JSON extraction...');
+    
+    try {
+      // Try to find and parse just the structure we need
+      const structureMatch = responseText.match(/\{[\s\S]*"days"\s*:\s*\[[\s\S]*\][\s\S]*\}/);
+      if (structureMatch) {
+        let extracted = structureMatch[0];
+        
+        // Clean up the extracted JSON more aggressively
+        extracted = extracted
+          .replace(/,(\s*[}\]])/g, '$1') // Remove trailing commas
+          .replace(/([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":') // Quote keys
+          .replace(/:\s*'([^']*?)'/g, ': "$1"') // Single to double quotes for values
+          .replace(/\/\*[\s\S]*?\*\//g, '') // Remove comments
+          .replace(/\/\/.*$/gm, ''); // Remove line comments
+        
+        return JSON.parse(extracted);
+      }
+    } catch (error) {
+      console.error('Aggressive extraction also failed:', error);
+    }
+    
+    // Final fallback: create minimal valid structure
+    console.log('Creating minimal fallback structure...');
+    throw new Error('Could not extract valid JSON structure from response');
+  }
+
+  private buildEnhancedPrompt(request: EnhancedItineraryRequest, hotelRecommendations: any[] | null = null): string {
+    // Validate and calculate duration safely
+    const startDateObj = new Date(request.startDate);
+    const endDateObj = new Date(request.endDate);
+    
+    // Check if dates are valid
+    if (isNaN(startDateObj.getTime()) || isNaN(endDateObj.getTime())) {
+      throw new Error(`Invalid date format - startDate: ${request.startDate}, endDate: ${request.endDate}`);
+    }
+    
+    const duration = Math.ceil((endDateObj.getTime() - startDateObj.getTime()) / (1000 * 60 * 60 * 24));
+    
+    // Ensure duration is positive
+    if (duration <= 0) {
+      throw new Error(`Invalid duration: end date must be after start date - startDate: ${request.startDate}, endDate: ${request.endDate}`);
+    }
     
     return `Create a detailed, personalized ${duration}-day travel itinerary for ${request.destination} in valid JSON format.
 
@@ -244,6 +447,16 @@ ${request.dietaryRestrictions?.length ? `- Dietary Restrictions: ${request.dieta
 BUDGET CONTEXT:
 ${request.hotelBudget ? `- Hotel Budget: Budget ₹${request.hotelBudget.budget}, Mid-range ₹${request.hotelBudget.midRange}, Luxury ₹${request.hotelBudget.luxury} per night` : ''}
 ${request.flightBudget ? `- Flight Budget: Outbound ₹${request.flightBudget.outbound}, Return ₹${request.flightBudget.return}` : ''}
+
+${hotelRecommendations ? `RECOMMENDED HOTELS (Use these actual hotels from Google Hotels):
+${hotelRecommendations.map((hotel, index) => 
+`${index + 1}. ${hotel.name}
+   - Rating: ${hotel.rating ? hotel.rating + '/5' : 'N/A'}
+   - Price: ₹${hotel.pricePerNight}/night (Total: ₹${hotel.totalPrice})
+   - Location: ${hotel.location}
+   - Class: ${hotel.hotelClass ? hotel.hotelClass + ' star' : 'Standard'}
+   - Top Amenities: ${hotel.amenities.join(', ') || 'Basic amenities'}`
+).join('\n\n')}` : ''}
 
 Return ONLY a valid JSON object (no markdown, no extra text) with this exact structure:
 
@@ -321,13 +534,20 @@ Return ONLY a valid JSON object (no markdown, no extra text) with this exact str
   "accommodation": {
     "type": "${request.accommodationType || 'hotel'}",
     "recommendations": [
-      {
-        "name": "Specific ${request.accommodationType || 'hotel'} name 1",
-        "area": "Best area in ${request.destination}",
+      ${hotelRecommendations ? hotelRecommendations.map(hotel => `{
+        "name": "${hotel.name.replace(/"/g, '\\"')}",
+        "area": "${hotel.location.replace(/"/g, '\\"')}",
+        "estimatedCostPerNight": ${hotel.pricePerNight || (request.hotelBudget ? request.hotelBudget[request.budget.replace('-', '') as keyof typeof request.hotelBudget] || 3500 : 3500)},
+        "rating": ${hotel.rating || 4.0},
+        "amenities": [${hotel.amenities.map((a: string) => `"${a}"`).join(', ')}],
+        "reason": "Highly rated ${hotel.hotelClass ? hotel.hotelClass + '-star' : ''} hotel perfect for ${request.travelStyle} travelers"
+      }`).join(',\n      ') : `{
+        "name": "Recommended ${request.accommodationType || 'hotel'} in ${request.destination}",
+        "area": "Central ${request.destination}",
         "estimatedCostPerNight": ${request.hotelBudget ? request.hotelBudget[request.budget.replace('-', '') as keyof typeof request.hotelBudget] || 3500 : 3500},
         "amenities": ["WiFi", "Breakfast", "Pool", "Spa"],
         "reason": "Perfect for ${request.travelStyle} travelers"
-      }
+      }`}
     ]
   },
   "budgetBreakdown": {
@@ -355,16 +575,27 @@ Return ONLY a valid JSON object (no markdown, no extra text) with this exact str
 REQUIREMENTS:
 - All costs in Indian Rupees (₹) for ${request.travelers} travelers
 - Authentic, specific activities for ${request.destination}
-- Include ${request.interests?.join(', ')} interests
+- Include ${request.interests?.join(', ') || 'general sightseeing'} interests
 - Match ${request.budget} budget level
 - Consider ${request.groupType} group dynamic
 - Respect ${request.fitnessLevel} fitness level
 - Include practical, actionable tips
 - Calculate accurate budget breakdown total
 - Logical daily timing and flow
+${hotelRecommendations ? '- IMPORTANT: Use the exact hotel names and pricing provided in the RECOMMENDED HOTELS section' : ''}
 ${request.dietaryRestrictions?.length ? `- Consider dietary restrictions: ${request.dietaryRestrictions.join(', ')}` : ''}
 
-Return only valid JSON without any markdown formatting or additional text.`;
+CRITICAL JSON FORMATTING RULES:
+- Return ONLY the JSON object, no other text
+- Use double quotes for all strings
+- No trailing commas after array/object elements
+- Ensure all JSON brackets and braces are properly matched
+- Numbers should not be quoted
+- Boolean values should be true/false (not quoted)
+- Escape special characters in strings (quotes, newlines, etc.)
+- The response must be valid for JSON.parse()
+
+Return the JSON now:`;
   }
 
   private validateAndProcessEnhancedItinerary(itinerary: any, request: EnhancedItineraryRequest): GeneratedItinerary {
@@ -769,14 +1000,14 @@ Return only valid JSON without any markdown formatting or additional text.`;
         itinerary: legacyItinerary
       };
     } catch (error) {
-      console.error('Groq API error:', error);
+      console.error('Perplexity API error:', error);
       return {
         success: false,
-        error: 'Failed to generate itinerary with Groq',
+        error: 'Failed to generate itinerary with Perplexity',
         suggestions: ['Please try again or contact support']
       };
     }
   }
 }
 
-export const groqItineraryService = new GroqItineraryService();
+export const perplexityItineraryService = new PerplexityItineraryService();
