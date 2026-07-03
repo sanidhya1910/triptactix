@@ -95,7 +95,7 @@ export interface GeneratedItinerary {
   };
 }
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || 'AIzaSyDNSS6NUH1Ie00L4_IANYajnC7Sw_jN99s');
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 export class GeminiItineraryService {
   private model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });

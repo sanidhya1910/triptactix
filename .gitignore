@@ -62,3 +62,5 @@ src/lib/groq-service.ts
 src/lib/rapidapi.ts
 .gitignore
 RESEARCH_PAPER_CONTEXT.txt
+
+research_paper.tex

@@ -1,0 +1,2 @@
+WARNING:main:Real-time scraper unavailable (No module named 'aiohttp'). Live-search endpoints are disabled; ML prediction still works.
+INFO:main:Analyzing price 6500 for New Delhi -> Mumbai

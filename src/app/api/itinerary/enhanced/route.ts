@@ -1,8 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { PerplexityItineraryService, EnhancedItineraryRequest } from '@/lib/perplexity-service';
+import { callMLAPI } from '@/lib/resilient-fetch';
+import { canonicalCity } from '@/lib/cities';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+// Cities the flight-price model is trained on.
+const ML_SUPPORTED = new Set(['New Delhi', 'Mumbai', 'Bangalore', 'Chennai', 'Kolkata', 'Hyderabad']);
+
+/**
+ * Predict a one-way fare with the real ML model for a supported metro route.
+ * Returns null when the route/date isn't usable so callers fall back to estimates.
+ */
+async function predictFare(
+  from: string, to: string, date: string, travelClass: string
+): Promise<{ price: number; confidence: number } | null> {
+  if (!ML_SUPPORTED.has(canonicalCity(from)) || !ML_SUPPORTED.has(canonicalCity(to))) return null;
+  const res = await callMLAPI<any>('/predict', {
+    airline: 'IndiGo', source_city: canonicalCity(from), destination_city: canonicalCity(to),
+    departure_date: date, departure_time: '10:00', total_stops: 0, travel_class: travelClass,
+  }, { maxRetries: 1, timeout: 3500 });
+  if (!res?.success || typeof res.predicted_price !== 'number') return null;
+  return { price: res.predicted_price, confidence: res.confidence ?? 0.7 };
+}
 
 const enhancedItinerarySchema = z.object({
   destination: z.string().min(2, 'Destination must be at least 2 characters'),
@@ -30,21 +52,51 @@ export async function POST(request: NextRequest) {
     
     const params = enhancedItinerarySchema.parse(body);
     
-    // Estimate baseline budgets based on travel style if real pricing is unavailable
+    // Flight budget: prefer the real ML price model for supported metro routes,
+    // and fall back to budget-tier estimates otherwise.
     let flightBudget;
-    if (params.includeFlight) {
-      const roughFlightCost = params.budget === 'luxury' ? 28000 : params.budget === 'mid-range' ? 18000 : 12000;
-      flightBudget = {
-        outbound: Math.round(roughFlightCost * 0.55),
-        return: Math.round(roughFlightCost * 0.45)
-      };
+    let flightInsight: any = null;
+    const flightClass = params.budget === 'luxury' ? 'business' : 'economy';
+
+    if (params.includeFlight && params.flightSource) {
+      const [outbound, inbound] = await Promise.all([
+        predictFare(params.flightSource, params.destination, params.startDate, flightClass),
+        predictFare(params.destination, params.flightSource, params.endDate, flightClass),
+      ]);
+
+      if (outbound && inbound) {
+        flightBudget = { outbound: outbound.price, return: inbound.price };
+        // When to book the outbound flight, from the model.
+        const advice = await callMLAPI<any>('/analyze-price', {
+          current_price: outbound.price,
+          source_city: canonicalCity(params.flightSource),
+          destination_city: canonicalCity(params.destination),
+          departure_date: params.startDate,
+        }, { maxRetries: 1, timeout: 3500 });
+        flightInsight = {
+          source: 'ml-model',
+          travelClass: flightClass,
+          outbound: outbound.price,
+          return: inbound.price,
+          confidence: Math.round(((outbound.confidence + inbound.confidence) / 2) * 100),
+          bookingAdvice: advice?.success ? {
+            action: advice.analysis?.action,
+            recommendation: advice.analysis?.recommendation,
+            bestDays: advice.analysis?.best_booking_days?.slice(0, 3) ?? [],
+          } : null,
+        };
+      } else {
+        const roughFlightCost = params.budget === 'luxury' ? 28000 : params.budget === 'mid-range' ? 18000 : 12000;
+        flightBudget = { outbound: Math.round(roughFlightCost * 0.55), return: Math.round(roughFlightCost * 0.45) };
+        flightInsight = { source: 'estimate', reason: 'Route outside the 6 supported metros' };
+      }
     }
 
     const enhancedRequest: EnhancedItineraryRequest = {
       ...params,
       flightBudget
     };
-    
+
   // Generate itinerary using Perplexity
   console.log('Generating enhanced itinerary with Perplexity...');
   const aiService = new PerplexityItineraryService();
@@ -54,9 +106,11 @@ export async function POST(request: NextRequest) {
   const isFallback = itinerary.isFallback === true;
   const source = isFallback ? 'perplexity-fallback-template' : 'perplexity-ai';
   const realPricing = {
-    flightPrices: flightBudget
-      ? (isFallback ? 'Template estimate (fallback itinerary)' : 'Estimated based on budget tier')
-      : 'Not requested',
+    flightPrices: !flightBudget
+      ? 'Not requested'
+      : flightInsight?.source === 'ml-model'
+        ? `Real ML model prediction (${flightInsight.confidence}% confidence)`
+        : 'Budget-tier estimate (route outside supported metros)',
     hotelPrices: isFallback
       ? 'Template estimate (fallback itinerary)'
       : 'Estimated via Perplexity model'
@@ -67,6 +121,7 @@ export async function POST(request: NextRequest) {
       data: {
         itinerary,
         realPricing,
+        flightInsight,
         generatedAt,
         source,
         fallbackReason: itinerary.fallbackReason ?? null

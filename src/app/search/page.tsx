@@ -7,6 +7,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import PriceTrendAnalysis from '@/components/charts/PriceTrendAnalysis';
+import FareCalendar from '@/components/charts/FareCalendar';
+import { recordSearch } from '@/lib/saved-trips';
 import { 
   PaperAirplaneIcon,
   SparklesIcon,
@@ -69,6 +71,19 @@ export default function SearchPage() {
       if (data.success) {
         setSearchResults(data.data);
         setRealtimeResults(null);
+        const flights = data.data?.flights || [];
+        const lowest = flights.length
+          ? Math.min(...flights.map((f: Flight) => f.price.total))
+          : undefined;
+        recordSearch({
+          origin: params.origin.city,
+          destination: params.destination.city,
+          departureDate: params.departureDate instanceof Date
+            ? params.departureDate.toISOString().split('T')[0]
+            : String(params.departureDate),
+          travelClass: params.travelClass,
+          lowestPrice: lowest,
+        });
       } else {
         throw new Error(data.error?.message || 'Search failed');
       }
@@ -177,14 +192,24 @@ export default function SearchPage() {
                 )}
               </div>
 
-              {/* ML Price Trend Analysis */}
-              {isMLMode && currentSearchParams && (
+              {/* ML Price Trend Analysis - always shown with mock fallback */}
+              {currentSearchParams && (
                 <PriceTrendAnalysis
                   sourceCity={currentSearchParams.origin.city}
                   destinationCity={currentSearchParams.destination.city}
                   currentPrice={(searchResults?.flights || []).reduce((min, f) => Math.min(min, f.price.total), Number.POSITIVE_INFINITY) !== Number.POSITIVE_INFINITY ?
                     (searchResults?.flights || []).reduce((min, f) => Math.min(min, f.price.total), Number.POSITIVE_INFINITY) : undefined}
                   departureDate={currentSearchParams.departureDate}
+                  className="mb-8"
+                />
+              )}
+
+              {/* Fare Calendar - cheapest day to fly */}
+              {currentSearchParams && (
+                <FareCalendar
+                  sourceCity={currentSearchParams.origin.city}
+                  destinationCity={currentSearchParams.destination.city}
+                  travelClass={currentSearchParams.travelClass}
                   className="mb-8"
                 />
               )}
@@ -369,6 +394,82 @@ export default function SearchPage() {
                   </motion.div>
                 ))}
               </div>
+
+              {/* Trains */}
+              {searchResults?.trains && searchResults.trains.length > 0 && (
+                <div className="mt-12">
+                  <h2 className="text-2xl font-bold text-black mb-6">Trains</h2>
+                  <div className="space-y-4">
+                    {searchResults.trains.slice(0, 6).map((train) => {
+                      const seg = train.outbound[0];
+                      return (
+                        <Card key={train.id} className="rounded-2xl border-neutral-200 bg-white hover:shadow-lg transition-shadow">
+                          <CardContent className="p-6 flex flex-wrap items-center justify-between gap-4">
+                            <div className="flex items-center gap-4">
+                              <div className="w-12 h-12 bg-neutral-900 rounded-xl flex items-center justify-center text-white text-xs font-bold">
+                                {seg.class}
+                              </div>
+                              <div>
+                                <div className="font-semibold text-black">{seg.trainName}</div>
+                                <div className="text-sm text-neutral-600">#{seg.trainNumber} · {train.operator}</div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-6 text-center">
+                              <div>
+                                <div className="font-semibold text-black">{new Date(seg.departureTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</div>
+                                <div className="text-xs text-neutral-500">{seg.origin.city}</div>
+                              </div>
+                              <div className="text-xs text-neutral-500">{formatDuration(seg.duration)}</div>
+                              <div>
+                                <div className="font-semibold text-black">{new Date(seg.arrivalTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}</div>
+                                <div className="text-xs text-neutral-500">{seg.destination.city}</div>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-2xl font-bold text-black">{formatPrice(train.price.total)}</div>
+                              <Button size="sm" variant="outline" className="mt-2">Select</Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Hotels */}
+              {searchResults?.hotels && searchResults.hotels.length > 0 && (
+                <div className="mt-12">
+                  <h2 className="text-2xl font-bold text-black mb-6">Hotels in {currentSearchParams?.destination.city}</h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {searchResults.hotels.map((hotel) => (
+                      <Card key={hotel.id} className="rounded-2xl border-neutral-200 bg-white hover:shadow-lg transition-shadow">
+                        <CardContent className="p-6">
+                          <div className="flex items-start justify-between gap-2 mb-2">
+                            <h3 className="font-semibold text-black leading-tight">{hotel.name}</h3>
+                            <span className="shrink-0 text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full font-semibold">
+                              ★ {hotel.rating.toFixed(1)}
+                            </span>
+                          </div>
+                          <p className="text-sm text-neutral-600 mb-3">{hotel.location.address}</p>
+                          <div className="flex flex-wrap gap-1.5 mb-4">
+                            {hotel.amenities.slice(0, 4).map((a) => (
+                              <span key={a} className="text-xs bg-neutral-100 text-neutral-700 px-2 py-0.5 rounded-full">{a}</span>
+                            ))}
+                          </div>
+                          <div className="flex items-end justify-between">
+                            <div>
+                              <div className="text-xl font-bold text-black">{formatPrice(hotel.rooms[0]?.price.perNight || 0)}</div>
+                              <div className="text-xs text-neutral-500">per night · {hotel.starRating}★</div>
+                            </div>
+                            <Button size="sm" variant="outline">View</Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>

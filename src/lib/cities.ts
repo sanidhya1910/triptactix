@@ -172,6 +172,28 @@ export const cities: City[] = [
   { name: 'Lagos', country: 'Nigeria', code: 'LOS', airport: 'Murtala Muhammed International Airport', region: 'Africa' },
 ];
 
+/**
+ * Canonical city name resolver — the single source of truth for city aliases.
+ * Different sources spell the same city differently (New Delhi/Delhi,
+ * Kolkata/Calcutta, Chennai/Madras, Mumbai/Bombay, Bangalore/Bengaluru); this
+ * maps every known alias to one primary name so search, predictions and
+ * schedules all treat them as the same place.
+ */
+const CITY_ALIASES: Record<string, string> = {
+  'new delhi': 'New Delhi', 'delhi': 'New Delhi',
+  'mumbai': 'Mumbai', 'bombay': 'Mumbai',
+  'bangalore': 'Bangalore', 'bengaluru': 'Bangalore',
+  'chennai': 'Chennai', 'madras': 'Chennai',
+  'kolkata': 'Kolkata', 'calcutta': 'Kolkata',
+  'hyderabad': 'Hyderabad',
+};
+
+export const canonicalCity = (name: string): string => {
+  if (!name) return name;
+  const key = name.trim().toLowerCase();
+  return CITY_ALIASES[key] || name.trim();
+};
+
 // Helper function to search cities
 export const searchCities = (query: string, limit: number = 10): City[] => {
   if (!query.trim()) return [];

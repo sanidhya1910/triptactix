@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { ML_API_BASE } from '@/lib/resilient-fetch';
 
 const flightSearchSchema = z.object({
   origin: z.string().min(1),
@@ -18,7 +19,7 @@ export async function POST(request: NextRequest) {
     console.log('Real-time flight search request:', searchParams);
 
     // Call the ML API for real-time flight search and comparison
-    const mlApiUrl = 'http://localhost:8000/compare-flights';
+    const mlApiUrl = `${ML_API_BASE}/compare-flights`;
     
     const mlRequest = {
       origin: searchParams.origin,

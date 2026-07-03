@@ -9,11 +9,24 @@ import logging
 import asyncio
 
 from ml_model import FlightPriceMLModel
-from realtime_scraper import RealTimeFlightScraper, FlightData
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# The real-time scraper is optional: it pulls live data and depends on
+# beautifulsoup4 / aiohttp. The core ML prediction API must still boot if those
+# extras are not installed, so import it lazily and degrade gracefully.
+try:
+    from realtime_scraper import RealTimeFlightScraper, FlightData
+    flight_scraper = RealTimeFlightScraper()
+    SCRAPER_AVAILABLE = True
+except Exception as scraper_exc:  # pragma: no cover - environment dependent
+    logger.warning(f"Real-time scraper unavailable ({scraper_exc}). "
+                   "Live-search endpoints are disabled; ML prediction still works.")
+    flight_scraper = None
+    FlightData = None
+    SCRAPER_AVAILABLE = False
 
 app = FastAPI(
     title="TripTactix ML API",
@@ -34,9 +47,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize ML model and scraper
+# Initialize ML model
 ml_model = FlightPriceMLModel()
-flight_scraper = RealTimeFlightScraper()
 
 # Load existing model or train new one
 if not ml_model.load_model():
@@ -98,8 +110,16 @@ async def health_check():
     return {
         "status": "healthy",
         "model_loaded": ml_model.model is not None,
+        "scraper_available": SCRAPER_AVAILABLE,
+        "metrics": ml_model.metrics,
         "timestamp": datetime.now().isoformat()
     }
+
+
+@app.get("/metrics")
+async def model_metrics():
+    """Real held-out evaluation metrics for the trained model."""
+    return {"success": True, "metrics": ml_model.metrics}
 
 @app.post("/predict", response_model=PredictionResponse)
 async def predict_flight_price(request: FlightPredictionRequest):
@@ -169,6 +189,8 @@ async def batch_predict_prices(requests: list[FlightPredictionRequest]):
 @app.post("/search-flights", response_model=FlightSearchResponse)
 async def search_realtime_flights(request: FlightSearchRequest):
     """Search for real-time flight prices from multiple sources"""
+    if not SCRAPER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Live-search scraper not available on this server")
     try:
         start_time = datetime.now()
         logger.info(f"Real-time flight search: {request.origin} -> {request.destination} on {request.departure_date}")
@@ -223,6 +245,8 @@ async def search_realtime_flights(request: FlightSearchRequest):
 @app.post("/compare-flights", response_model=FlightComparisonResponse)
 async def compare_flights_with_ml(request: FlightSearchRequest):
     """Search real-time flights and compare with ML predictions"""
+    if not SCRAPER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Live-search scraper not available on this server")
     try:
         logger.info(f"Flight comparison with ML: {request.origin} -> {request.destination}")
         
@@ -397,6 +421,27 @@ async def get_price_trend_get(source_city: str, destination_city: str, days_ahea
         logger.error(f"Price trend (GET) failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Price trend analysis failed: {str(e)}")
 
+class FareCalendarRequest(BaseModel):
+    source_city: str
+    destination_city: str
+    days_ahead: Optional[int] = 60
+    travel_class: Optional[str] = "economy"
+
+@app.post("/fare-calendar")
+async def fare_calendar(request: FareCalendarRequest):
+    """Cheapest-day-to-fly calendar: predicted fare per date over a horizon."""
+    try:
+        result = ml_model.get_fare_calendar(
+            request.source_city,
+            request.destination_city,
+            request.days_ahead or 60,
+            request.travel_class or "economy",
+        )
+        return {"success": True, **result}
+    except Exception as e:
+        logger.error(f"Fare calendar failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Fare calendar failed: {str(e)}")
+
 @app.post("/analyze-price")
 async def analyze_current_price(request: PriceAnalysisRequest):
     """Analyze current price vs predicted trends and provide recommendation"""
@@ -424,15 +469,9 @@ async def analyze_current_price(request: PriceAnalysisRequest):
 async def get_available_cities():
     """Get list of cities available in the ML model"""
     try:
-        # Load real data to get available cities
-        df = ml_model.load_real_data()
-        
-        source_cities = sorted(df['source_city'].unique().tolist()) if not df.empty else []
-        dest_cities = sorted(df['destination_city'].unique().tolist()) if not df.empty else []
-        
-        # Get combined unique cities
-        all_cities = sorted(list(set(source_cities + dest_cities)))
-        
+        # Derived from the fitted model encoders (fast; no CSV re-parse).
+        all_cities = ml_model.get_known_cities()
+
         return {
             "success": True,
             "cities": all_cities,
@@ -446,6 +485,8 @@ async def get_available_cities():
 @app.get("/historical-prices/{origin}/{destination}")
 async def get_historical_prices(origin: str, destination: str, days_back: int = 30):
     """Get historical price data for a route"""
+    if not SCRAPER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Live-search scraper not available on this server")
     try:
         historical_data = flight_scraper.get_historical_prices(
             origin=origin,

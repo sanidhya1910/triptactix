@@ -5,6 +5,15 @@ export interface RetryOptions {
   timeout: number;
 }
 
+/**
+ * Base URL of the Python ML API. Configurable via env so it works in
+ * production (a hosted API) instead of being hardcoded to localhost.
+ */
+export const ML_API_BASE =
+  process.env.ML_API_URL ||
+  process.env.NEXT_PUBLIC_ML_API_URL ||
+  'http://localhost:8000';
+
 export class NetworkError extends Error {
   constructor(public code: string, message: string, public originalError?: Error) {
     super(message);
@@ -116,7 +125,7 @@ export async function callMLAPI<T>(
     }
 
     const response = await resilientFetch(
-      `http://localhost:8000${endpoint}`,
+      `${ML_API_BASE}${endpoint}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

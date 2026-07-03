@@ -20,9 +20,9 @@ export default function HomePage() {
       <Navbar currentPage="home" />
 
       {/* Hero Section - full screen with no horizontal padding */}
-      <section className="pt-18 pb-8 px-2">
+      <section className="pt-20 pb-8 px-2 sm:px-4">
         <div className="w-full">
-          <div className="relative rounded-3xl overflow-hidden ring-1 ring-neutral-200 min-h-[calc(102vh-7rem)]">
+          <div className="relative rounded-3xl overflow-hidden ring-1 ring-neutral-200 min-h-[calc(100vh-6rem)]">
             {/* Background image */}
             <div
               className="absolute inset-0 bg-cover bg-center"
@@ -31,25 +31,25 @@ export default function HomePage() {
             {/* Subtle overlay for readability (doesn't change text content) */}
             <div className="absolute inset-0 bg-white/25" />
             {/* Content */}
-            <div className="relative z-10 flex items-center justify-center h-full">
-              <div className="max-w-5xl mx-auto text-center hero-container py-2 px-4 sm:px-6 md:px-8">
+            <div className="relative z-10 flex items-center justify-center min-h-[calc(100vh-6rem)]">
+              <div className="max-w-5xl mx-auto text-center hero-container py-16 px-4 sm:px-6 md:px-8">
                 <div className="inline-flex items-center gap-2 bg-neutral-100 px-4 py-2 rounded-full text-sm text-neutral-700 mb-8">
-                  <SparklesIcon className="py w-4 h-4" />
+                  <SparklesIcon className="w-4 h-4" />
                   AI-Powered Travel Planning
                 </div>
-                
+
                 <h1 className="text-6xl md:text-7xl lg:text-8xl font-semibold text-black mb-8 leading-tight tracking-tight">
                   Plan Your Perfect
                   <br />
                   <span className="text-neutral-600">Journey</span>
                 </h1>
-                
-                <p className="text-xl md:text-2xl text-neutral-600 mb-12 hero-subtext leading-relaxed py-36">
-                  Discover personalized travel experiences with AI-powered itinerary planning, 
+
+                <p className="text-xl md:text-2xl text-neutral-600 mb-12 hero-subtext leading-relaxed">
+                  Discover personalized travel experiences with AI-powered itinerary planning,
                   real-time price comparisons, and seamless booking.
                 </p>
-                
-                <div className="py-4 flex flex-col sm:flex-row gap-4 justify-center items-center">
+
+                <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
                   <Button size="lg" className="px-8 py-4 text-lg" asChild>
                     <Link href="/itinerary" className="flex items-center gap-2">
                       Start Planning
@@ -120,20 +120,20 @@ export default function HomePage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
             <div>
-              <div className="text-4xl font-bold text-black mb-2">0.8s</div>
-              <div className="text-neutral-600">Latency</div>
+              <div className="text-4xl font-bold text-black mb-2">600K+</div>
+              <div className="text-neutral-600">Flight Records</div>
             </div>
             <div>
               <div className="text-4xl font-bold text-black mb-2">6</div>
-              <div className="text-neutral-600">Destinations</div>
+              <div className="text-neutral-600">Metro Cities</div>
             </div>
             <div>
-              <div className="text-4xl font-bold text-black mb-2">30K+</div>
-              <div className="text-neutral-600">Dataset Size</div>
+              <div className="text-4xl font-bold text-black mb-2">0.97</div>
+              <div className="text-neutral-600">Model R² Score</div>
             </div>
             <div>
-              <div className="text-4xl font-bold text-black mb-2">98%</div>
-              <div className="text-neutral-600">Confidence upto</div>
+              <div className="text-4xl font-bold text-black mb-2">&lt;1s</div>
+              <div className="text-neutral-600">Prediction Latency</div>
             </div>
           </div>
         </div>
@@ -201,7 +201,7 @@ export default function HomePage() {
           
           <div className="border-t border-neutral-800 mt-12 pt-8 text-center">
             <p className="text-neutral-400">
-              © 2024 Triptactix. All rights reserved.
+              © {new Date().getFullYear()} Triptactix. All rights reserved.
             </p>
           </div>
         </div>

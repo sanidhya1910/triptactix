@@ -6,9 +6,9 @@ A modern travel platform that generates personalized itineraries using AI, compa
 
 ## ✨ Features
 
-- **AI Itinerary Generator** - Create detailed travel plans with Gemini AI
-- **Multi-Modal Search** - Compare flights, trains, and hotels
-- **Price Predictions** - ML-powered forecasting for best booking times
+- **AI Itinerary Generator** - Create detailed travel plans with Groq LLMs
+- **Multi-Modal Search** - Compare flights and trains (live flights via SerpAPI / Google Flights)
+- **Price Predictions** - A real gradient-boosting model (R² ≈ 0.97) trained on 600K+ Indian flight records forecasts fares and the best time to book
 - **India-Focused** - Optimized for Indian destinations with INR pricing
 - **Responsive Design** - Works seamlessly on all devices
 
@@ -31,9 +31,10 @@ A modern travel platform that generates personalized itineraries using AI, compa
 - **NextAuth.js** - Authentication (ready)
 
 ### AI & APIs
-- **Google Gemini AI** - Intelligent itinerary generation
-- **RapidAPI** - Travel search integration
-- **Chart.js** - Price prediction visualizations
+- **Groq LLMs** - Intelligent itinerary generation
+- **SerpAPI (Google Flights)** - Live flight search
+- **Python ML API** - FastAPI service serving the flight-price model (see `python-ml-api/`)
+- **Recharts** - Price prediction visualizations
 
 ### Infrastructure
 - **Cloudflare Pages** - Global CDN hosting
@@ -88,9 +89,11 @@ npx wrangler pages deploy out --project-name=triptactix
 ## 🔧 Environment Variables
 
 ```env
-GEMINI_API_KEY=your_gemini_api_key
-RAPIDAPI_KEY=your_rapidapi_key
+GROQ_API_KEY=your_groq_api_key
+SERPAPI_KEY=your_serpapi_key
 NEXTAUTH_SECRET=your_secret_key
+# Optional: point the frontend at a hosted Python ML API (defaults to http://localhost:8000)
+ML_API_URL=http://localhost:8000
 ```
 
 ## 📊 Key Metrics

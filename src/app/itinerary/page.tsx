@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -32,6 +33,7 @@ import CityAutocomplete from '@/components/ui/CityAutocomplete';
 import { City } from '@/lib/cities';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GeneratedItinerary } from '@/lib/perplexity-service';
+import { saveTrip } from '@/lib/saved-trips';
 
 interface ItineraryFormData {
   destination: string;
@@ -49,11 +51,26 @@ interface ItineraryFormData {
   dietaryRestrictions: string[];
 }
 
+interface FlightInsight {
+  source: 'ml-model' | 'estimate';
+  travelClass?: string;
+  outbound?: number;
+  return?: number;
+  confidence?: number;
+  reason?: string;
+  bookingAdvice?: {
+    action?: string;
+    recommendation?: string;
+    bestDays?: Array<{ date: string; price: number; day_of_week: string; days_until: number }>;
+  } | null;
+}
+
 interface ItineraryMeta {
   realPricing?: {
     flightPrices?: string;
     hotelPrices?: string;
   };
+  flightInsight?: FlightInsight | null;
   generatedAt?: string;
   source?: string;
   fallbackReason?: string | null;
@@ -84,6 +101,7 @@ const getGroupTravelerRules = (groupType: ItineraryFormData['groupType']): Trave
 export default function EnhancedItineraryPage() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [hasItinerary, setHasItinerary] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
   const [generatedItinerary, setGeneratedItinerary] = useState<GeneratedItinerary | null>(null);
   const [itineraryMeta, setItineraryMeta] = useState<ItineraryMeta | null>(null);
   const [sourceCity, setSourceCity] = useState<City | null>(null);
@@ -213,7 +231,8 @@ export default function EnhancedItineraryPage() {
     }
     
     setIsGenerating(true);
-    
+    setIsSaved(false);
+
     try {
       const requestData = {
         destination: destinationCity.name,
@@ -247,6 +266,7 @@ export default function EnhancedItineraryPage() {
         setGeneratedItinerary(result.data.itinerary);
         setItineraryMeta({
           realPricing: result.data.realPricing,
+          flightInsight: result.data.flightInsight ?? null,
           generatedAt: result.data.generatedAt,
           source: result.data.source,
           fallbackReason: result.data.fallbackReason ?? result.data.itinerary?.fallbackReason ?? null,
@@ -715,8 +735,25 @@ export default function EnhancedItineraryPage() {
                 >
                   Edit Trip
                 </Button>
-                <Button className="bg-black hover:bg-neutral-800 text-white">
-                  Save Itinerary
+                <Button
+                  className="bg-black hover:bg-neutral-800 text-white"
+                  disabled={isSaved || !generatedItinerary}
+                  onClick={() => {
+                    if (!generatedItinerary) return;
+                    saveTrip({
+                      destination: generatedItinerary.destination || destinationCity?.name || formData.destination,
+                      flightSource: formData.includeFlight ? sourceCity?.name : undefined,
+                      startDate: formData.startDate || (startDate ? format(startDate, 'yyyy-MM-dd') : ''),
+                      endDate: formData.endDate || (endDate ? format(endDate, 'yyyy-MM-dd') : ''),
+                      travelers: formData.travelers,
+                      budget: formData.budget,
+                      totalCost: generatedItinerary.budgetBreakdown?.total,
+                      itinerary: generatedItinerary,
+                    });
+                    setIsSaved(true);
+                  }}
+                >
+                  {isSaved ? '✓ Saved to My Trips' : 'Save Itinerary'}
                 </Button>
               </div>
             </div>
@@ -854,6 +891,75 @@ export default function EnhancedItineraryPage() {
                             Source: {sourceLabel}
                           </p>
                         )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* ML Flight Price Intelligence */}
+                {itineraryMeta?.flightInsight?.source === 'ml-model' && (
+                  <Card className="mb-8 border-2 border-black bg-white">
+                    <CardHeader className="bg-black text-white rounded-t-md">
+                      <CardTitle className="flex items-center text-xl">
+                        <SparklesIcon className="w-6 h-6 mr-2" />
+                        Flight Price Intelligence
+                        <span className="ml-3 text-xs font-normal bg-white/20 px-2 py-0.5 rounded-full">
+                          ML model · {itineraryMeta.flightInsight.confidence}% confidence
+                        </span>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-6 space-y-5">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="p-4 rounded-xl border border-neutral-200 bg-neutral-50 text-center">
+                          <p className="text-xs text-neutral-500 uppercase tracking-wide">Predicted Outbound</p>
+                          <p className="text-2xl font-bold text-black mt-1">
+                            {formatCurrency(itineraryMeta.flightInsight.outbound || 0)}
+                          </p>
+                          <p className="text-xs text-neutral-600 mt-1">{sourceCity?.name} → {destinationCity?.name}</p>
+                        </div>
+                        <div className="p-4 rounded-xl border border-neutral-200 bg-neutral-50 text-center">
+                          <p className="text-xs text-neutral-500 uppercase tracking-wide">Predicted Return</p>
+                          <p className="text-2xl font-bold text-black mt-1">
+                            {formatCurrency(itineraryMeta.flightInsight.return || 0)}
+                          </p>
+                          <p className="text-xs text-neutral-600 mt-1">{destinationCity?.name} → {sourceCity?.name}</p>
+                        </div>
+                        <div className="p-4 rounded-xl border border-neutral-200 bg-neutral-50 text-center">
+                          <p className="text-xs text-neutral-500 uppercase tracking-wide">Class</p>
+                          <p className="text-2xl font-bold text-black mt-1 capitalize">
+                            {itineraryMeta.flightInsight.travelClass}
+                          </p>
+                          <p className="text-xs text-neutral-600 mt-1">Based on your budget tier</p>
+                        </div>
+                      </div>
+
+                      {itineraryMeta.flightInsight.bookingAdvice?.recommendation && (
+                        <div className="p-4 rounded-xl bg-green-50 border border-green-200">
+                          <p className="text-sm font-semibold text-green-800 capitalize">
+                            {itineraryMeta.flightInsight.bookingAdvice.action?.replace(/_/g, ' ') || 'When to book'}
+                          </p>
+                          <p className="text-sm text-green-700 mt-1">
+                            {itineraryMeta.flightInsight.bookingAdvice.recommendation}
+                          </p>
+                          {!!itineraryMeta.flightInsight.bookingAdvice.bestDays?.length && (
+                            <div className="flex flex-wrap gap-2 mt-3">
+                              {itineraryMeta.flightInsight.bookingAdvice.bestDays.map((d, i) => (
+                                <span key={i} className="px-2 py-1 bg-white border border-green-200 rounded-full text-xs text-green-700">
+                                  {d.day_of_week} ({d.days_until}d) — {formatCurrency(d.price)}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs text-neutral-500">
+                          Predicted by the gradient-boosting model trained on 600K+ flight records.
+                        </p>
+                        <Button asChild variant="outline" size="sm">
+                          <Link href="/search">Search &amp; book these flights →</Link>
+                        </Button>
                       </div>
                     </CardContent>
                   </Card>

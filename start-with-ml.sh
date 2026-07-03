@@ -1,12 +1,20 @@
+
 #!/bin/bash
 
 echo "🚀 Starting TripTactix with Real ML Backend"
 echo "==========================================="
 
-# Check if Python is installed
-if ! command -v python3 &> /dev/null; then
-    echo "❌ Python 3 is required but not installed"
-    exit 1
+# Pick a Python command that exists on this machine.
+# Allow callers to provide PYTHON_CMD explicitly (useful on Windows Git Bash).
+if [[ -z "$PYTHON_CMD" ]]; then
+    if command -v python3 &> /dev/null; then
+        PYTHON_CMD="python3"
+    elif command -v python &> /dev/null; then
+        PYTHON_CMD="python"
+    else
+        echo "❌ Python 3 is required but not installed"
+        exit 1
+    fi
 fi
 
 # Check if Node.js is installed
@@ -38,11 +46,18 @@ cd python-ml-api
 # Create virtual environment if it doesn't exist
 if [[ ! -d "venv" ]]; then
     echo "📦 Creating Python virtual environment..."
-    python3 -m venv venv
+    "$PYTHON_CMD" -m venv venv
 fi
 
-# Activate virtual environment
-source venv/bin/activate
+# Activate virtual environment (Linux/macOS and Windows Git Bash)
+if [[ -f "venv/bin/activate" ]]; then
+    source venv/bin/activate
+elif [[ -f "venv/Scripts/activate" ]]; then
+    source venv/Scripts/activate
+else
+    echo "❌ Could not find virtual environment activation script"
+    exit 1
+fi
 
 # Install dependencies
 echo "📥 Installing Python dependencies..."
@@ -56,19 +71,31 @@ fi
 
 # Start ML API in background
 echo "🔥 Starting ML API server on port 8000..."
-uvicorn main:app --host 0.0.0.0 --port 8000 --log-level info &
+"$PYTHON_CMD" -m uvicorn main:app --host 0.0.0.0 --port 8000 --log-level info > ml-api.log 2>&1 &
 ML_API_PID=$!
 
-# Wait for ML API to start
+# Wait for ML API to start (model loading can take time)
 echo "⏳ Waiting for ML API to start..."
-sleep 5
+ML_API_READY=0
+for i in {1..30}; do
+    if curl -s http://localhost:8000/health > /dev/null; then
+        ML_API_READY=1
+        break
+    fi
+    sleep 1
+done
 
 # Test ML API
-if curl -s http://localhost:8000/health > /dev/null; then
+if [[ "$ML_API_READY" -eq 1 ]]; then
     echo "✅ ML API is running at http://localhost:8000"
     echo "📚 API Documentation at http://localhost:8000/docs"
 else
     echo "❌ Failed to start ML API"
+    if [[ -f "ml-api.log" ]]; then
+        echo "--- ML API log ---"
+        tail -n 50 ml-api.log
+        echo "------------------"
+    fi
     cleanup
     exit 1
 fi

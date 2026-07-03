@@ -1,4 +1,6 @@
 import { Flight, SearchParams } from '@/types/travel';
+import { scheduleService } from '@/lib/schedule-service';
+import { canonicalCity } from '@/lib/cities';
 
 interface FlightSearchCache {
   [key: string]: {
@@ -26,15 +28,15 @@ export class RealtimeFlightService {
       return cached;
     }
 
-    console.log('Generating enhanced mock flight data...');
-    
     try {
-      // Generate enhanced mock data with realistic flight patterns
-      const flights = this.getEnhancedMockFlights(params);
-      
+      // Prefer real published schedules (real flight numbers + times) for this
+      // route; fall back to generated data only when we have no schedule for it.
+      const scheduled = this.getScheduledFlights(params);
+      const flights = scheduled.length > 0 ? scheduled : this.getEnhancedMockFlights(params);
+
       // Cache the results
       this.setCache(cacheKey, flights);
-      
+
       return flights;
     } catch (error) {
       console.error('Flight search failed:', error);
@@ -108,6 +110,91 @@ export class RealtimeFlightService {
     };
 
     return airportCodes[city.toLowerCase()] || city.toUpperCase().substring(0, 3);
+  }
+
+  /**
+   * Build flights from real published schedules (data/Air-Clean.csv).
+   * Schedules carry no price, so we estimate a realistic fare per airline while
+   * keeping the genuine flight numbers, departure/arrival times and operating days.
+   */
+  private static getScheduledFlights(params: SearchParams): Flight[] {
+    const schedules = scheduleService.getSchedules(
+      params.origin.city,
+      params.destination.city,
+      params.departureDate
+    );
+    if (schedules.length === 0) return [];
+
+    const airlineMultiplier: Record<string, number> = {
+      IndiGo: 1.0, 'Air India': 1.2, SpiceJet: 0.9, Vistara: 1.3,
+      GoAir: 0.85, 'Go First': 0.85, 'Akasa Air': 1.1, AirAsia: 0.88,
+    };
+    const basePrice = this.calculateBasePrice(params.origin.city, params.destination.city);
+
+    const toDate = (hhmm: string, base: Date, addDay = 0): Date => {
+      const [h, m] = hhmm.split(':').map((n) => parseInt(n, 10));
+      const d = new Date(base);
+      d.setHours(h, m, 0, 0);
+      if (addDay) d.setDate(d.getDate() + addDay);
+      return d;
+    };
+
+    return schedules.slice(0, 14).map((s, index) => {
+      const departureTime = toDate(s.depTime, params.departureDate);
+      let arrivalTime = toDate(s.arrTime, params.departureDate);
+      if (arrivalTime <= departureTime) arrivalTime = toDate(s.arrTime, params.departureDate, 1);
+      const duration = Math.round((arrivalTime.getTime() - departureTime.getTime()) / 60000);
+
+      const mult = airlineMultiplier[s.airline] ?? 1.0;
+      const price = Math.round(basePrice * mult * (0.85 + ((index % 5) * 0.06)));
+
+      return {
+        id: `sched_${s.flightNumber.replace(/\s+/g, '')}_${index}`,
+        airline: s.airline,
+        price: {
+          total: price,
+          currency: 'INR',
+          breakdown: {
+            base: Math.round(price * 0.8),
+            taxes: Math.round(price * 0.15),
+            fees: Math.round(price * 0.05),
+          },
+        },
+        outbound: [{
+          id: `sched_${index}_outbound`,
+          origin: {
+            id: this.getAirportCode(params.origin.city),
+            name: params.origin.name,
+            code: this.getAirportCode(params.origin.city),
+            city: params.origin.city,
+            country: params.origin.country,
+            type: 'airport' as const,
+          },
+          destination: {
+            id: this.getAirportCode(params.destination.city),
+            name: params.destination.name,
+            code: this.getAirportCode(params.destination.city),
+            city: params.destination.city,
+            country: params.destination.country,
+            type: 'airport' as const,
+          },
+          departureTime,
+          arrivalTime,
+          duration,
+          airline: s.airline,
+          flightNumber: s.flightNumber,
+          aircraft: this.getRandomAircraft(),
+          stops: 0,
+        }],
+        bookingClass: params.travelClass,
+        stops: 0,
+        baggage: { checkedBags: 1, carryOnBags: 1, personalItem: true },
+        amenities: ['In-flight entertainment'],
+        refundable: false,
+        changeable: true,
+        source: 'Published schedule',
+      } as Flight;
+    }).sort((a, b) => a.price.total - b.price.total);
   }
 
   /**
@@ -219,27 +306,28 @@ export class RealtimeFlightService {
    */
   private static getDistanceBetweenCities(city1: string, city2: string): number {
     const distances: { [key: string]: number } = {
-      'delhi-mumbai': 1150,
-      'mumbai-delhi': 1150,
-      'delhi-bangalore': 1740,
-      'bangalore-delhi': 1740,
+      'new delhi-mumbai': 1150,
+      'mumbai-new delhi': 1150,
+      'new delhi-bangalore': 1740,
+      'bangalore-new delhi': 1740,
       'mumbai-bangalore': 840,
       'bangalore-mumbai': 840,
-      'delhi-chennai': 1760,
-      'chennai-delhi': 1760,
+      'new delhi-chennai': 1760,
+      'chennai-new delhi': 1760,
       'mumbai-chennai': 1030,
       'chennai-mumbai': 1030,
       'bangalore-chennai': 290,
       'chennai-bangalore': 290,
-      'delhi-kolkata': 1320,
-      'kolkata-delhi': 1320,
+      'new delhi-kolkata': 1320,
+      'kolkata-new delhi': 1320,
       'mumbai-kolkata': 1650,
       'kolkata-mumbai': 1650,
-      'delhi-hyderabad': 1270,
-      'hyderabad-delhi': 1270
+      'new delhi-hyderabad': 1270,
+      'hyderabad-new delhi': 1270
     };
 
-    const key = `${city1.toLowerCase()}-${city2.toLowerCase()}`;
+    // Canonicalise so Delhi/New Delhi, Calcutta/Kolkata, etc. all match.
+    const key = `${canonicalCity(city1).toLowerCase()}-${canonicalCity(city2).toLowerCase()}`;
     return distances[key] || 1000; // Default 1000 km
   }
 

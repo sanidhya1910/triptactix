@@ -4,12 +4,12 @@ Real machine learning-powered flight price prediction API using Python, FastAPI,
 
 ## 🚀 Features
 
-- **Real ML Model**: Random Forest Regressor trained on synthetic flight data
-- **Feature Engineering**: Airline encoding, route popularity, time factors, booking patterns
-- **Price Confidence**: ML-based confidence intervals and prediction ranges
-- **Historical Charts**: Price trend analysis with historical and predicted data
-- **Smart Recommendations**: Book now, wait, or monitor based on ML predictions
-- **Fast API**: RESTful API with automatic interactive documentation
+- **Real ML Model**: Gradient-boosted trees (`HistGradientBoostingRegressor`) trained on **600K+ real Indian flight records**
+- **Two complementary datasets**: `Indian Airlines.csv` (booking-window / `days_left`) + `goibibo_flights_data.csv` (real dates, times & seasonality), combined via native missing-value handling
+- **Class-aware**: Economy vs Business are modelled separately (a major accuracy fix)
+- **Honest confidence**: 10th/90th-percentile quantile models give real prediction intervals
+- **Smart Recommendations**: Book now / wait, judged against the prediction for *your* departure date
+- **Fast API**: RESTful API with automatic interactive documentation and a `/metrics` endpoint
 
 ## 🛠️ Setup
 
@@ -54,14 +54,16 @@ Deploy to cloud platforms like:
 ## 📊 ML Model Details
 
 ### Training Data
-- **10,000 synthetic samples** covering Indian airline routes
-- **Features**: Airline, source/destination cities, time factors, booking patterns
-- **Labels**: Realistic price calculations based on industry factors
+- **~600,000 real flight records** combined from two datasets in `../data/`:
+  - `Indian Airlines.csv` — provides the **booking window** (`days_left`) signal
+  - `goibibo_flights_data.csv` — provides **real flight dates/times** (true month, weekday & departure-hour seasonality)
+- Each dataset is missing the column the other provides; the gradient-boosting model learns the booking-window effect from one and the calendar-seasonality effect from the other, while sharing airline/route/class/stops/duration signal. Falls back to synthetic data only if the CSVs are absent.
 
 ### Model Architecture
-- **Algorithm**: Random Forest Regressor (100 estimators)
-- **Features**: 13 engineered features including encodings and temporal patterns
-- **Performance**: ~₹500 MAE on test data with 85-95% confidence intervals
+- **Algorithm**: `HistGradientBoostingRegressor` (median) + two quantile models (P10/P90) for prediction intervals
+- **Why not a time-series model (e.g. Chronos)?** This is tabular regression, not univariate forecasting — gradient-boosted trees are more accurate here, train in seconds, serialise to ~8 MB (vs ~70 MB for the old Random Forest), and natively handle the per-dataset missing columns.
+- **Features (12)**: airline, source, destination, class, stops, duration, departure hour, days-until-departure, month, weekday, weekend flag, route popularity
+- **Performance**: **R² ≈ 0.977**, MAE ≈ ₹2,100 on held-out data across both Economy and Business (see `models/metrics.json`)
 
 ### Key Features:
 1. **Airline Encoding**: Different price tiers for Indian airlines

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { SearchParams, SearchResults, Flight, Train } from '@/types/travel';
+import { SearchParams, SearchResults, Flight, Train, Hotel } from '@/types/travel';
 import { SerpAPIService } from '@/lib/serpapi-service';
 import { RealtimeFlightService } from '@/lib/realtime-flights';
 import { mlService } from '@/lib/ml-service';
+import { canonicalCity } from '@/lib/cities';
 import { callMLAPI, NetworkError } from '@/lib/resilient-fetch';
 
 export const dynamic = 'force-dynamic';
@@ -86,15 +87,16 @@ export async function POST(request: NextRequest) {
 }
 
 async function performSearch(params: SearchParams & { useMLPredictions?: boolean }): Promise<SearchResults> {
-  const [flights, trains] = await Promise.all([
+  const [flights, trains, hotels] = await Promise.all([
     searchFlights(params),
     searchTrains(params),
+    searchHotels(params),
   ]);
 
   return {
     flights,
     trains,
-    hotels: [],
+    hotels,
     packages: [],
     searchId: generateSearchId(),
     searchParams: params,
@@ -123,27 +125,16 @@ async function searchFlights(params: SearchParams & { useMLPredictions?: boolean
       // Compute route-level predicted price using Python ML API for consistency with analysis card
       let pythonPredicted: number | undefined;
       try {
-        // ML prediction integration - skip during build to avoid ECONNRESET
-      let pythonPredicted = null;
-      try {
         // Skip ML API calls during build process
         if (!process.env.NEXT_BUILD && process.env.NODE_ENV !== 'test' && typeof window === 'undefined') {
-          const normalizeCity = (c: string): string => {
-            const map: Record<string, string> = {
-              'Mumbai': 'Mumbai',
-              'Bombay': 'Mumbai', 
-              'Bengaluru': 'Bangalore',
-            };
-            return map[c] || c;
-          };
-          const src = normalizeCity(params.origin.city);
-          const dst = normalizeCity(params.destination.city);
+          const src = canonicalCity(params.origin.city);
+          const dst = canonicalCity(params.destination.city);
           const routeMinPrice = Math.min(...serpFlights.map(f => f.price.total));
-          
+
           // Only make network calls in actual runtime, not build
-          const isRuntimeEnvironment = process.env.NODE_ENV === 'development' || 
+          const isRuntimeEnvironment = process.env.NODE_ENV === 'development' ||
                                      (process.env.NODE_ENV === 'production' && typeof process !== 'undefined' && process.pid);
-          
+
           if (isRuntimeEnvironment) {
             try {
               const mlResult = await callMLAPI<any>('/analyze-price', {
@@ -155,7 +146,7 @@ async function searchFlights(params: SearchParams & { useMLPredictions?: boolean
                 maxRetries: 2,
                 timeout: 3000
               });
-              
+
               if (mlResult?.success && mlResult?.analysis?.current_vs_predicted?.predicted_price) {
                 pythonPredicted = mlResult.analysis.current_vs_predicted.predicted_price;
               }
@@ -168,9 +159,6 @@ async function searchFlights(params: SearchParams & { useMLPredictions?: boolean
             }
           }
         }
-      } catch (mlApiError) {
-        console.warn('ML price prediction failed:', mlApiError);
-      }
       } catch (mlApiError) {
         console.warn('ML price prediction failed:', mlApiError);
       }
@@ -376,7 +364,23 @@ async function searchFlights(params: SearchParams & { useMLPredictions?: boolean
           };
         });
 
-        return transformedFlights;
+        // Add mock ML predictions to fallback flights
+        return transformedFlights.map(f => {
+          const mockPredicted = Math.round(f.price.total * (0.9 + Math.random() * 0.2));
+          const savingsPercent = Math.round(((f.price.total - mockPredicted) / mockPredicted) * 100);
+          return {
+            ...f,
+            mlPrediction: {
+              predictedPrice: mockPredicted,
+              confidence: 0.55 + Math.random() * 0.25,
+              recommendation: savingsPercent <= -10 ? 'Excellent deal — below predicted price' :
+                savingsPercent >= 10 ? 'Consider waiting — above predicted price' :
+                'Fair price — near predicted range',
+              priceRange: { min: f.price.total * 0.8, max: f.price.total * 1.2 },
+              savingsPercent,
+            },
+          };
+        });
       }
     }
     
@@ -417,43 +421,141 @@ function formatDate(date: Date): string {
   return date.toISOString().split('T')[0];
 }
 
+// Rough inter-city rail distances (km) for realistic durations & fares.
+const RAIL_DISTANCE_KM: Record<string, number> = {
+  'new delhi-mumbai': 1385, 'new delhi-bangalore': 2150, 'new delhi-chennai': 2180,
+  'new delhi-kolkata': 1450, 'new delhi-hyderabad': 1500, 'mumbai-bangalore': 980,
+  'mumbai-chennai': 1280, 'mumbai-kolkata': 1960, 'mumbai-hyderabad': 710,
+  'bangalore-chennai': 360, 'bangalore-hyderabad': 570, 'chennai-hyderabad': 630,
+  'chennai-kolkata': 1660, 'bangalore-kolkata': 1870, 'kolkata-hyderabad': 1490,
+};
+
+function railDistanceKm(a: string, b: string): number {
+  const k1 = `${canonicalCity(a).toLowerCase()}-${canonicalCity(b).toLowerCase()}`;
+  const k2 = `${canonicalCity(b).toLowerCase()}-${canonicalCity(a).toLowerCase()}`;
+  return RAIL_DISTANCE_KM[k1] || RAIL_DISTANCE_KM[k2] || 900;
+}
+
 async function searchTrains(params: SearchParams): Promise<Train[]> {
-  // Mock train data with INR pricing for Indian routes
-  const mockTrains: Train[] = [
-    {
-      id: 'train-1',
-      operator: 'Indian Railways',
-      class: 'AC First Class',
-      outbound: [
-        {
-          id: 'outbound-train-1',
-          origin: params.origin,
-          destination: params.destination,
-          departureTime: new Date(params.departureDate.getTime() + 4 * 60 * 60 * 1000),
-          arrivalTime: new Date(params.departureDate.getTime() + 12 * 60 * 60 * 1000),
-          duration: 480, // 8 hours
-          trainNumber: '12345',
-          trainName: 'Express Premium',
-          operator: 'Indian Railways',
-          class: 'AC First Class',
-        },
-      ],
-      price: {
-        total: 2500,
-        currency: 'INR',
-        breakdown: {
-          base: 2200,
-          taxes: 300,
-          fees: 0,
-        },
-      },
-      amenities: ['AC', 'Meals', 'WiFi'],
-      refundable: true,
-      changeable: true,
-    },
+  const distance = railDistanceKm(params.origin.city, params.destination.city);
+
+  // Per-km fares (₹) roughly aligned to Indian Railways class pricing.
+  const classFare: Record<string, number> = { SL: 0.55, '3A': 1.5, '2A': 2.2, '1A': 3.7, CC: 1.3 };
+
+  const templates = [
+    { number: '12951', name: 'Rajdhani Express', depHour: 16, speed: 85, classes: ['1A', '2A', '3A'], amenities: ['AC', 'Meals included', 'Bedding', 'Charging'] },
+    { number: '12259', name: 'Duronto Express', depHour: 22, speed: 80, classes: ['2A', '3A', 'SL'], amenities: ['AC', 'Pantry car', 'Bedding'] },
+    { number: '12627', name: 'Superfast Express', depHour: 6, speed: 60, classes: ['2A', '3A', 'SL'], amenities: ['Pantry car', 'Charging'] },
+    { number: '12211', name: 'Garib Rath', depHour: 13, speed: 75, classes: ['3A', 'CC'], amenities: ['AC', 'Economy bedding'] },
   ];
 
-  return mockTrains;
+  const trains: Train[] = [];
+  for (const t of templates) {
+    const durationMin = Math.round((distance / t.speed) * 60);
+    const departureTime = new Date(params.departureDate);
+    departureTime.setHours(t.depHour, [0, 15, 30, 45][t.number.charCodeAt(4) % 4], 0, 0);
+    const arrivalTime = new Date(departureTime.getTime() + durationMin * 60000);
+
+    for (const cls of t.classes) {
+      const base = Math.max(250, Math.round((distance * classFare[cls]) / 10) * 10);
+      const total = base + Math.round(base * 0.05);
+      trains.push({
+        id: `train-${t.number}-${cls}`,
+        operator: 'Indian Railways',
+        class: cls,
+        outbound: [{
+          id: `train-${t.number}-${cls}-out`,
+          origin: params.origin,
+          destination: params.destination,
+          departureTime,
+          arrivalTime,
+          duration: durationMin,
+          trainNumber: t.number,
+          trainName: t.name,
+          operator: 'Indian Railways',
+          class: cls,
+        }],
+        price: { total, currency: 'INR', breakdown: { base, taxes: total - base, fees: 0 } },
+        amenities: t.amenities,
+        refundable: true,
+        changeable: true,
+      });
+    }
+  }
+
+  return trains.sort((a, b) => a.price.total - b.price.total);
+}
+
+async function searchHotels(params: SearchParams): Promise<Hotel[]> {
+  // Try real hotels via SerpAPI; fall back to realistic generated options.
+  try {
+    const real = await SerpAPIService.searchHotels({
+      destination: params.destination.city,
+      checkInDate: formatDate(params.departureDate),
+      checkOutDate: formatDate(params.returnDate ?? new Date(params.departureDate.getTime() + 2 * 86400000)),
+      adults: params.passengers.adults,
+      currency: 'INR',
+    });
+    if (real.length > 0) {
+      return real.slice(0, 6).map((h: any, i: number): Hotel => {
+        const perNight = h.ratePerNight?.extractedLowest || h.totalRate?.extractedLowest || 4500;
+        return {
+          id: `serp-hotel-${i}`,
+          name: h.name || `Hotel ${i + 1}`,
+          location: { address: h.nearbyPlaces?.[0]?.name || `${params.destination.city}`, city: params.destination.city, country: 'India', coordinates: { lat: 0, lng: 0 } },
+          rating: h.overallRating || 4,
+          starRating: h.extractedHotelClass || 4,
+          images: h.images?.slice(0, 1).map((im: any) => im.thumbnail) || [],
+          amenities: h.amenities?.slice(0, 6) || ['WiFi', 'Breakfast'],
+          rooms: [buildRoom(`serp-${i}`, perNight, params)],
+        };
+      });
+    }
+  } catch (e) {
+    console.warn('SerpAPI hotels unavailable, using generated hotels:', e instanceof Error ? e.message : e);
+  }
+  return generateHotels(params);
+}
+
+function buildRoom(idSuffix: string, perNight: number, params: SearchParams): any {
+  const nights = params.returnDate
+    ? Math.max(1, Math.ceil((params.returnDate.getTime() - params.departureDate.getTime()) / 86400000))
+    : 2;
+  const total = perNight * nights;
+  return {
+    id: `room-${idSuffix}`, type: 'standard', name: 'Standard Room',
+    description: 'Comfortable room with modern amenities',
+    capacity: { adults: 2, children: 1 },
+    price: { total, currency: 'INR', perNight, breakdown: { base: Math.round(total * 0.85), taxes: Math.round(total * 0.15), fees: 0 } },
+    amenities: ['WiFi', 'AC', 'TV'], images: [], availability: true, refundable: true, changeable: true,
+  };
+}
+
+function generateHotels(params: SearchParams): Hotel[] {
+  const city = params.destination.city;
+  const metros = new Set(['New Delhi', 'Mumbai', 'Bangalore', 'Chennai', 'Kolkata', 'Hyderabad']);
+  const tierBase = metros.has(canonicalCity(city)) ? 5000 : 3200;
+  const options = [
+    { name: `The Grand ${city}`, star: 5, mult: 2.6, area: 'City Centre', amenities: ['Pool', 'Spa', 'WiFi', 'Restaurant', 'Gym', 'Bar'] },
+    { name: `${city} Marriott`, star: 5, mult: 2.2, area: 'Business District', amenities: ['Pool', 'WiFi', 'Restaurant', 'Gym'] },
+    { name: `Courtyard ${city}`, star: 4, mult: 1.5, area: 'Airport Road', amenities: ['WiFi', 'Breakfast', 'Gym', 'Restaurant'] },
+    { name: `Ginger ${city}`, star: 3, mult: 1.0, area: 'Railway Station', amenities: ['WiFi', 'Breakfast', 'AC'] },
+    { name: `FabHotel ${city} Inn`, star: 3, mult: 0.8, area: 'Old Town', amenities: ['WiFi', 'AC', 'Breakfast'] },
+    { name: `Zostel ${city}`, star: 2, mult: 0.55, area: 'Backpacker Hub', amenities: ['WiFi', 'Common Kitchen', 'Lounge'] },
+  ];
+  return options.map((o, i): Hotel => {
+    const perNight = Math.round((tierBase * o.mult) / 100) * 100;
+    return {
+      id: `hotel-${i}`,
+      name: o.name,
+      location: { address: `${o.area}, ${city}`, city, country: 'India', coordinates: { lat: 0, lng: 0 } },
+      rating: Math.min(5, 3.6 + o.star * 0.25),
+      starRating: o.star,
+      images: [],
+      amenities: o.amenities,
+      rooms: [buildRoom(`gen-${i}`, perNight, params)],
+    };
+  });
 }
 
 function generateSearchId(): string {

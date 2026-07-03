@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { canonicalCity } from '@/lib/cities';
 
 
 interface HistoricalFlightData {
@@ -40,6 +41,17 @@ interface RouteAnalytics {
   mostCommonAirline: string;
   bestTimeToBook: string;
   popularTimeSlots: string[];
+}
+
+interface RouteIntelligence {
+  route: string;
+  totalFlights: number;
+  airlinePositioning: Array<{ airline: string; avgPrice: number; minPrice: number; count: number }>;
+  timeSlotPricing: Array<{ slot: string; avgPrice: number; count: number }>;
+  bookingWindow: Array<{ bucket: string; avgPrice: number }>;
+  cheapestAirline: string;
+  cheapestTimeSlot: string;
+  cheapestBookingWindow: string;
 }
 
 class MLService {
@@ -223,7 +235,7 @@ class MLService {
 
     if (routeData.length === 0) {
       return {
-        route: `${from} → ${to}`,
+        route: `${canonicalCity(from)} → ${canonicalCity(to)}`,
         totalFlights: 0,
         airlines: [],
         averagePrice: 0,
@@ -298,6 +310,72 @@ class MLService {
       mostCommonAirline: this.denormalizeAirline(mostCommonAirline),
       bestTimeToBook,
       popularTimeSlots
+    };
+  }
+
+  /**
+   * Deep route intelligence: airline price positioning, departure-time pricing
+   * and the booking-window curve, computed from the historical records.
+   */
+  public async getRouteIntelligence(from: string, to: string): Promise<RouteIntelligence> {
+    const empty: RouteIntelligence = {
+      route: `${canonicalCity(from)} → ${canonicalCity(to)}`,
+      totalFlights: 0, airlinePositioning: [], timeSlotPricing: [], bookingWindow: [],
+      cheapestAirline: '', cheapestTimeSlot: '', cheapestBookingWindow: '',
+    };
+    if (!this.isDataLoaded) return empty;
+
+    const routeData = this.historicalData.filter(flight =>
+      this.normalizeCity(flight.source_city) === this.normalizeCity(from) &&
+      this.normalizeCity(flight.destination_city) === this.normalizeCity(to) &&
+      flight.class?.toLowerCase?.() === 'economy'
+    );
+    if (routeData.length === 0) return empty;
+
+    const avg = (xs: number[]) => Math.round(xs.reduce((a, b) => a + b, 0) / xs.length);
+
+    // Airline positioning
+    const byAirline = new Map<string, number[]>();
+    for (const f of routeData) {
+      const a = this.denormalizeAirline(f.airline);
+      (byAirline.get(a) ?? byAirline.set(a, []).get(a)!).push(f.price);
+    }
+    const airlinePositioning = [...byAirline.entries()]
+      .map(([airline, prices]) => ({
+        airline, avgPrice: avg(prices), minPrice: Math.min(...prices), count: prices.length,
+      }))
+      .sort((a, b) => a.avgPrice - b.avgPrice);
+
+    // Departure time-slot pricing
+    const bySlot = new Map<string, number[]>();
+    for (const f of routeData) {
+      const s = this.getTimeSlot(f.departure_time);
+      (bySlot.get(s) ?? bySlot.set(s, []).get(s)!).push(f.price);
+    }
+    const timeSlotPricing = [...bySlot.entries()]
+      .map(([slot, prices]) => ({ slot, avgPrice: avg(prices), count: prices.length }))
+      .sort((a, b) => a.avgPrice - b.avgPrice);
+
+    // Booking-window curve
+    const byBucket = new Map<string, number[]>();
+    for (const f of routeData) {
+      const b = this.getDaysLeftBucket(f.days_left);
+      (byBucket.get(b) ?? byBucket.set(b, []).get(b)!).push(f.price);
+    }
+    const bucketOrder = ['0-7 days', '8-21 days', '22-45 days', '46-60 days', '60+ days'];
+    const bookingWindow = [...byBucket.entries()]
+      .map(([bucket, prices]) => ({ bucket, avgPrice: avg(prices) }))
+      .sort((a, b) => bucketOrder.indexOf(a.bucket) - bucketOrder.indexOf(b.bucket));
+
+    return {
+      route: `${canonicalCity(from)} → ${canonicalCity(to)}`,
+      totalFlights: routeData.length,
+      airlinePositioning,
+      timeSlotPricing,
+      bookingWindow,
+      cheapestAirline: airlinePositioning[0]?.airline ?? '',
+      cheapestTimeSlot: timeSlotPricing[0]?.slot ?? '',
+      cheapestBookingWindow: [...bookingWindow].sort((a, b) => a.avgPrice - b.avgPrice)[0]?.bucket ?? '',
     };
   }
 
@@ -381,20 +459,8 @@ class MLService {
 
   // Helper methods
   private normalizeCity(city: string): string {
-    const cityMap: Record<string, string> = {
-      'New Delhi': 'Delhi',
-      'Delhi': 'Delhi',
-      'Mumbai': 'Mumbai',
-      'Bombay': 'Mumbai',
-      'Bangalore': 'Bangalore',
-      'Bengaluru': 'Bangalore',
-      'Chennai': 'Chennai',
-      'Madras': 'Chennai',
-      'Hyderabad': 'Hyderabad',
-      'Kolkata': 'Kolkata',
-      'Calcutta': 'Kolkata'
-    };
-    return cityMap[city] || city;
+    // Single source of truth for alias handling (New Delhi/Delhi, Kolkata/Calcutta, ...).
+    return canonicalCity(city);
   }
 
   private normalizeAirline(airline: string): string {
@@ -422,13 +488,21 @@ class MLService {
   }
 
   private parseDuration(duration: string): number {
-    // Parse duration like "2h 30m" to minutes
-    const hoursMatch = duration.match(/(\d+)h/);
-    const minutesMatch = duration.match(/(\d+)m/);
-    
+    if (!duration) return 0;
+    const trimmed = duration.trim();
+
+    // Indian Airlines.csv stores duration as decimal hours, e.g. "2.17".
+    if (/^\d+(\.\d+)?$/.test(trimmed)) {
+      return Math.round(parseFloat(trimmed) * 60);
+    }
+
+    // Otherwise parse "2h 30m" / "02h 10m" style strings to minutes.
+    const hoursMatch = trimmed.match(/(\d+)\s*h/);
+    const minutesMatch = trimmed.match(/(\d+)\s*m/);
+
     const hours = hoursMatch ? parseInt(hoursMatch[1]) : 0;
     const minutes = minutesMatch ? parseInt(minutesMatch[1]) : 0;
-    
+
     return hours * 60 + minutes;
   }
 
@@ -534,34 +608,19 @@ class MLService {
   public getAvailableRoutes(): Array<{ from: string; to: string; flightCount: number }> {
     if (!this.isDataLoaded) return [];
 
+    // Group by canonical city names so aliases collapse into one route.
     const routeCounts = this.historicalData.reduce((acc, flight) => {
-      const route = `${flight.source_city}-${flight.destination_city}`;
+      const route = `${canonicalCity(flight.source_city)}→${canonicalCity(flight.destination_city)}`;
       acc[route] = (acc[route] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
 
     return Object.entries(routeCounts)
       .map(([route, count]) => {
-        const [from, to] = route.split('-');
-        return {
-          from: this.denormalizeCity(from),
-          to: this.denormalizeCity(to),
-          flightCount: count
-        };
+        const [from, to] = route.split('→');
+        return { from, to, flightCount: count };
       })
       .sort((a, b) => b.flightCount - a.flightCount);
-  }
-
-  private denormalizeCity(city: string): string {
-    const cityMap: Record<string, string> = {
-      'Delhi': 'New Delhi',
-      'Mumbai': 'Mumbai',
-      'Bangalore': 'Bangalore',
-      'Chennai': 'Chennai',
-      'Hyderabad': 'Hyderabad',
-      'Kolkata': 'Kolkata'
-    };
-    return cityMap[city] || city;
   }
 
   /**
@@ -629,4 +688,4 @@ class MLService {
 }
 
 export const mlService = new MLService();
-export type { PricePrediction, RouteAnalytics };
+export type { PricePrediction, RouteAnalytics, RouteIntelligence };
