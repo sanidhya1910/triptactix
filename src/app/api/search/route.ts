@@ -373,9 +373,9 @@ async function searchFlights(params: SearchParams & { useMLPredictions?: boolean
             mlPrediction: {
               predictedPrice: mockPredicted,
               confidence: 0.55 + Math.random() * 0.25,
-              recommendation: savingsPercent <= -10 ? 'Excellent deal — below predicted price' :
-                savingsPercent >= 10 ? 'Consider waiting — above predicted price' :
-                'Fair price — near predicted range',
+              recommendation: savingsPercent <= -10 ? 'Excellent deal, below predicted price' :
+                savingsPercent >= 10 ? 'Consider waiting, above predicted price' :
+                'Fair price, near predicted range',
               priceRange: { min: f.price.total * 0.8, max: f.price.total * 1.2 },
               savingsPercent,
             },

@@ -64,7 +64,7 @@ function write<T>(key: string, items: T[]): void {
     window.localStorage.setItem(key, JSON.stringify(items));
     window.dispatchEvent(new Event('tt-storage'));
   } catch {
-    /* quota / disabled storage — ignore */
+    /* quota / disabled storage, ignore */
   }
 }
 

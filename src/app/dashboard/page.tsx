@@ -1,274 +1,401 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
+import {
+  BellRinging,
+  BookmarkSimple,
+  MagnifyingGlass,
+  Trash,
+  ArrowsClockwise,
+  MapPin,
+  Users,
+  ArrowRight,
+} from '@phosphor-icons/react/ssr';
+import { toast } from 'sonner';
+import { AppShell } from '@/components/layout/AppShell';
+import { SiteFooter } from '@/components/layout/SiteFooter';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Navbar } from '@/components/layout/Navbar';
-import { 
-  PlusIcon,
-  MapPinIcon,
-  CalendarDaysIcon,
-  ClockIcon,
-  UserIcon,
-  PaperAirplaneIcon,
-  BuildingOfficeIcon,
-  CurrencyRupeeIcon,
-  StarIcon,
-  EyeIcon,
-  TrashIcon,
-  PencilIcon
-} from '@heroicons/react/24/outline';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Stat } from '@/components/ui/stat';
+import {
+  getTrips,
+  removeTrip,
+  getRecentSearches,
+  getAlerts,
+  removeAlert,
+  checkAlert,
+  type SavedTrip,
+  type RecentSearch,
+  type PriceAlert,
+} from '@/lib/saved-trips';
 
-interface Trip {
-  id: string;
-  title: string;
-  destination: string;
-  startDate: string;
-  endDate: string;
-  status: 'upcoming' | 'completed' | 'cancelled';
-  budget: number;
-  travelers: number;
-  image?: string;
-}
+const inr = (n?: number) =>
+  n === undefined
+    ? '--'
+    : new Intl.NumberFormat('en-IN', {
+        style: 'currency',
+        currency: 'INR',
+        maximumFractionDigits: 0,
+      }).format(n);
 
-const sampleTrips: Trip[] = [
-  {
-    id: '1',
-    title: 'Mumbai Business Trip',
-    destination: 'Mumbai, India',
-    startDate: '2024-02-15',
-    endDate: '2024-02-18',
-    status: 'upcoming',
-    budget: 25000,
-    travelers: 1
-  },
-  {
-    id: '2',
-    title: 'Goa Vacation',
-    destination: 'Goa, India',
-    startDate: '2024-01-20',
-    endDate: '2024-01-25',
-    status: 'completed',
-    budget: 45000,
-    travelers: 2
-  },
-  {
-    id: '3',
-    title: 'Kerala Backwaters',
-    destination: 'Kochi, India',
-    startDate: '2024-03-10',
-    endDate: '2024-03-17',
-    status: 'upcoming',
-    budget: 35000,
-    travelers: 4
-  }
-];
+const shortDate = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+};
+
+const isUpcoming = (trip: SavedTrip) => {
+  const end = new Date(trip.endDate);
+  return Number.isNaN(end.getTime()) ? true : end >= new Date(new Date().toDateString());
+};
 
 export default function DashboardPage() {
-  const [trips, setTrips] = useState<Trip[]>(sampleTrips);
-  const [activeTab, setActiveTab] = useState<'all' | 'upcoming' | 'completed'>('all');
+  const [trips, setTrips] = useState<SavedTrip[]>([]);
+  const [searches, setSearches] = useState<RecentSearch[]>([]);
+  const [alerts, setAlerts] = useState<PriceAlert[]>([]);
+  const [checking, setChecking] = useState<string | null>(null);
+  const [checkingAll, setCheckingAll] = useState(false);
+  // localStorage is only readable after mount, so the first paint is a skeleton
+  // rather than a flash of the empty state.
+  const [ready, setReady] = useState(false);
 
-  const filteredTrips = trips.filter(trip => {
-    if (activeTab === 'all') return true;
-    return trip.status === activeTab;
-  });
+  const refresh = useCallback(() => {
+    setTrips(getTrips());
+    setSearches(getRecentSearches());
+    setAlerts(getAlerts());
+  }, []);
 
-  const stats = {
-    totalTrips: trips.length,
-    upcomingTrips: trips.filter(t => t.status === 'upcoming').length,
-    completedTrips: trips.filter(t => t.status === 'completed').length,
-    totalSpent: trips.filter(t => t.status === 'completed').reduce((sum, t) => sum + t.budget, 0)
-  };
+  useEffect(() => {
+    refresh();
+    setReady(true);
+    window.addEventListener('tt-storage', refresh);
+    return () => window.removeEventListener('tt-storage', refresh);
+  }, [refresh]);
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'upcoming':
-        return 'bg-green-100 text-green-800 border-green-200';
-      case 'completed':
-        return 'bg-neutral-100 text-neutral-800 border-neutral-200';
-      case 'cancelled':
-        return 'bg-red-100 text-red-800 border-red-200';
-      default:
-        return 'bg-neutral-100 text-neutral-800 border-neutral-200';
+  const checkOne = async (alert: PriceAlert) => {
+    setChecking(alert.id);
+    try {
+      const updated = await checkAlert(alert);
+      refresh();
+      toast[updated.triggered ? 'success' : 'info'](
+        updated.triggered
+          ? `${alert.origin} to ${alert.destination} is at or below ${inr(alert.targetPrice)}`
+          : `${alert.origin} to ${alert.destination} is still above target`,
+        { description: `Model price ${inr(updated.lastPrice)}` }
+      );
+    } catch {
+      toast.error('Could not check that alert. Please try again.');
+    } finally {
+      setChecking(null);
     }
   };
 
+  const checkAll = async () => {
+    setCheckingAll(true);
+    try {
+      for (const alert of getAlerts()) {
+        await checkAlert(alert);
+      }
+      refresh();
+      toast.success('All alerts re-checked');
+    } catch {
+      toast.error('Some alerts could not be checked. Please try again.');
+    } finally {
+      setCheckingAll(false);
+    }
+  };
+
+  const upcoming = trips.filter(isUpcoming).length;
+  const triggered = alerts.filter((a) => a.triggered).length;
+  const planned = trips.reduce((sum, t) => sum + (t.totalCost ?? 0), 0);
+
+  const everythingEmpty = trips.length === 0 && searches.length === 0 && alerts.length === 0;
+
   return (
-    <div className="min-h-screen bg-white">
-      <Navbar currentPage="dashboard" showGetStarted={false} />
-
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-20">
-        {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+    <>
+      <AppShell>
+        <header className="flex flex-wrap items-end justify-between gap-6">
           <div>
-            <h1 className="text-3xl font-bold text-black">Your Trips</h1>
-            <p className="text-neutral-600 mt-2">Manage and track all your travel plans</p>
-          </div>
-          <Button size="lg" className="px-6">
-            <PlusIcon className="w-5 h-5 mr-2" />
-            Plan New Trip
-          </Button>
-        </div>
-
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-neutral-600">Total Trips</p>
-                  <p className="text-2xl font-bold text-black">{stats.totalTrips}</p>
-                </div>
-                <div className="w-12 h-12 bg-neutral-100 rounded-lg flex items-center justify-center">
-                  <MapPinIcon className="w-6 h-6 text-neutral-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-neutral-600">Upcoming</p>
-                  <p className="text-2xl font-bold text-black">{stats.upcomingTrips}</p>
-                </div>
-                <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-                  <CalendarDaysIcon className="w-6 h-6 text-green-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-neutral-600">Completed</p>
-                  <p className="text-2xl font-bold text-black">{stats.completedTrips}</p>
-                </div>
-                <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                  <StarIcon className="w-6 h-6 text-blue-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-neutral-600">Total Spent</p>
-                  <p className="text-2xl font-bold text-black">₹{stats.totalSpent.toLocaleString()}</p>
-                </div>
-                <div className="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center">
-                  <CurrencyRupeeIcon className="w-6 h-6 text-yellow-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Filter Tabs */}
-        <div className="flex space-x-1 bg-neutral-100 p-1 rounded-lg mb-8 w-fit">
-          <Button
-            variant={activeTab === 'all' ? 'default' : 'ghost'}
-            size="sm"
-            onClick={() => setActiveTab('all')}
-            className="min-w-[80px]"
-          >
-            All
-          </Button>
-          <Button
-            variant={activeTab === 'upcoming' ? 'default' : 'ghost'}
-            size="sm"
-            onClick={() => setActiveTab('upcoming')}
-            className="min-w-[80px]"
-          >
-            Upcoming
-          </Button>
-          <Button
-            variant={activeTab === 'completed' ? 'default' : 'ghost'}
-            size="sm"
-            onClick={() => setActiveTab('completed')}
-            className="min-w-[80px]"
-          >
-            Completed
-          </Button>
-        </div>
-
-        {/* Trips Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredTrips.map((trip) => (
-            <Card key={trip.id} className="hover:shadow-lg transition-shadow">
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between">
-                  <div>
-                    <CardTitle className="text-lg">{trip.title}</CardTitle>
-                    <p className="text-neutral-600 text-sm mt-1 flex items-center">
-                      <MapPinIcon className="w-4 h-4 mr-1" />
-                      {trip.destination}
-                    </p>
-                  </div>
-                  <span className={`px-2 py-1 text-xs rounded-full border ${getStatusColor(trip.status)}`}>
-                    {trip.status}
-                  </span>
-                </div>
-              </CardHeader>
-              
-              <CardContent>
-                <div className="space-y-3">
-                  <div className="flex items-center text-sm text-neutral-600">
-                    <CalendarDaysIcon className="w-4 h-4 mr-2" />
-                    {new Date(trip.startDate).toLocaleDateString()} - {new Date(trip.endDate).toLocaleDateString()}
-                  </div>
-                  
-                  <div className="flex items-center justify-between text-sm">
-                    <div className="flex items-center text-neutral-600">
-                      <UserIcon className="w-4 h-4 mr-1" />
-                      {trip.travelers} {trip.travelers === 1 ? 'Traveler' : 'Travelers'}
-                    </div>
-                    <div className="font-semibold text-black">
-                      ₹{trip.budget.toLocaleString()}
-                    </div>
-                  </div>
-                  
-                  <div className="flex space-x-2 pt-3">
-                    <Button variant="outline" size="sm" className="flex-1">
-                      <EyeIcon className="w-4 h-4 mr-1" />
-                      View
-                    </Button>
-                    <Button variant="outline" size="sm" className="flex-1">
-                      <PencilIcon className="w-4 h-4 mr-1" />
-                      Edit
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-
-        {filteredTrips.length === 0 && (
-          <div className="text-center py-12">
-            <div className="w-16 h-16 bg-neutral-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <MapPinIcon className="w-8 h-8 text-neutral-400" />
-            </div>
-            <h3 className="text-lg font-semibold text-neutral-900 mb-2">
-              No trips found
-            </h3>
-            <p className="text-neutral-600 mb-6">
-              {activeTab === 'all' 
-                ? "You haven't planned any trips yet. Start by creating your first trip!"
-                : `No ${activeTab} trips found.`}
+            <h1 className="text-display-sm text-ink">Your trips</h1>
+            <p className="mt-3 text-ink-secondary">
+              Saved itineraries, price alerts and recent searches. Stored on this device only.
             </p>
-            <Button>
-              <PlusIcon className="w-5 h-5 mr-2" />
-              Plan Your First Trip
-            </Button>
           </div>
+          <Button asChild>
+            <Link href="/itinerary">
+              Plan a trip
+              <ArrowRight className="h-4 w-4" weight="bold" />
+            </Link>
+          </Button>
+        </header>
+
+        {!ready ? (
+          <div className="mt-14 space-y-10">
+            <div className="grid grid-cols-2 gap-8 md:grid-cols-4">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="space-y-2">
+                  <Skeleton className="h-9 w-20" />
+                  <Skeleton className="h-4 w-28" />
+                </div>
+              ))}
+            </div>
+            <Skeleton className="h-11 w-80" />
+            <div className="grid gap-5 md:grid-cols-2">
+              <Skeleton className="h-44" />
+              <Skeleton className="h-44" />
+            </div>
+          </div>
+        ) : everythingEmpty ? (
+          <EmptyState
+            className="mt-14"
+            icon={<BookmarkSimple className="h-6 w-6" />}
+            title="Nothing saved yet"
+            description="Generate an itinerary or set a price alert on a route and it will show up here."
+            action={
+              <>
+                <Button asChild>
+                  <Link href="/itinerary">Plan a trip</Link>
+                </Button>
+                <Button variant="outline" asChild>
+                  <Link href="/search">Check a fare</Link>
+                </Button>
+              </>
+            }
+          />
+        ) : (
+          <>
+            <div className="mt-14 grid grid-cols-2 gap-x-8 gap-y-10 border-y border-line py-10 md:grid-cols-4 md:divide-x md:divide-line">
+              <Stat
+                value={String(trips.length)}
+                label="Saved trips"
+                className="md:px-8 md:first:pl-0"
+              />
+              <Stat value={String(upcoming)} label="Still upcoming" className="md:px-8" />
+              <Stat
+                value={String(alerts.length)}
+                label="Price alerts"
+                detail={triggered > 0 ? `${triggered} at or below target` : undefined}
+                className="md:px-8"
+              />
+              <Stat
+                value={planned > 0 ? inr(planned) : '--'}
+                label="Planned spend"
+                className="md:px-8 md:last:pr-0"
+              />
+            </div>
+
+            <Tabs defaultValue="trips" className="mt-12">
+              <TabsList>
+                <TabsTrigger value="trips">Trips ({trips.length})</TabsTrigger>
+                <TabsTrigger value="alerts">Alerts ({alerts.length})</TabsTrigger>
+                <TabsTrigger value="searches">Searches ({searches.length})</TabsTrigger>
+              </TabsList>
+
+              {/* Trips */}
+              <TabsContent value="trips">
+                {trips.length === 0 ? (
+                  <EmptyState
+                    as="h3"
+                    icon={<BookmarkSimple className="h-6 w-6" />}
+                    title="No saved trips"
+                    description="Itineraries you save from the planner land here."
+                    action={
+                      <Button asChild>
+                        <Link href="/itinerary">Plan a trip</Link>
+                      </Button>
+                    }
+                  />
+                ) : (
+                  <ul className="grid gap-5 md:grid-cols-2">
+                    {trips.map((trip) => (
+                      <li key={trip.id} className="flex">
+                        <Card interactive className="flex w-full flex-col">
+                          <CardContent className="flex flex-1 flex-col p-6">
+                            <div className="flex items-start justify-between gap-4">
+                              <h2 className="text-lg font-semibold text-ink">
+                                {trip.destination}
+                              </h2>
+                              <Badge variant={isUpcoming(trip) ? 'positive' : 'neutral'}>
+                                {isUpcoming(trip) ? 'Upcoming' : 'Past'}
+                              </Badge>
+                            </div>
+
+                            <dl className="mt-5 space-y-2.5 text-sm">
+                              <div className="flex items-center gap-2 text-ink-secondary">
+                                <dt className="sr-only">Dates</dt>
+                                <MapPin className="h-4 w-4 shrink-0 text-ink-tertiary" />
+                                <dd className="[font-variant-numeric:tabular-nums]">
+                                  {shortDate(trip.startDate)} to {shortDate(trip.endDate)}
+                                </dd>
+                              </div>
+                              <div className="flex items-center gap-2 text-ink-secondary">
+                                <dt className="sr-only">Travellers</dt>
+                                <Users className="h-4 w-4 shrink-0 text-ink-tertiary" />
+                                <dd>
+                                  {trip.travelers} {trip.travelers === 1 ? 'traveller' : 'travellers'}
+                                  {trip.budget ? ` · ${trip.budget}` : ''}
+                                </dd>
+                              </div>
+                            </dl>
+
+                            {trip.totalCost !== undefined && (
+                              <p className="mt-5 font-mono text-xl text-ink [font-variant-numeric:tabular-nums]">
+                                {inr(trip.totalCost)}
+                              </p>
+                            )}
+
+                            {/* Actions pinned to the bottom so they line up across cards. */}
+                            <div className="mt-auto flex items-center gap-2 pt-6">
+                              <Button variant="outline" size="sm" asChild>
+                                <Link href="/itinerary">Open planner</Link>
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                aria-label={`Delete saved trip to ${trip.destination}`}
+                                onClick={() => {
+                                  removeTrip(trip.id);
+                                  refresh();
+                                  toast.success('Trip removed');
+                                }}
+                              >
+                                <Trash className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </TabsContent>
+
+              {/* Price alerts */}
+              <TabsContent value="alerts">
+                {alerts.length === 0 ? (
+                  <EmptyState
+                    as="h3"
+                    icon={<BellRinging className="h-6 w-6" />}
+                    title="No price alerts"
+                    description="Set a target price on a route and we will tell you when the model expects it to drop."
+                    action={
+                      <Button asChild>
+                        <Link href="/search">Check a fare</Link>
+                      </Button>
+                    }
+                  />
+                ) : (
+                  <>
+                    <div className="mb-5 flex justify-end">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={checkAll}
+                        disabled={checkingAll}
+                      >
+                        <ArrowsClockwise className="h-4 w-4" />
+                        {checkingAll ? 'Checking' : 'Re-check all'}
+                      </Button>
+                    </div>
+                    <ul className="space-y-3">
+                      {alerts.map((a) => (
+                        <li key={a.id}>
+                          <Card className={a.triggered ? 'border-pos-fg/25 bg-pos' : undefined}>
+                            <CardContent className="flex flex-wrap items-center justify-between gap-4 p-5">
+                              <div className="min-w-0">
+                                <p className="font-medium text-ink">
+                                  {a.origin} to {a.destination}
+                                </p>
+                                <p className="mt-1 text-sm text-ink-secondary [font-variant-numeric:tabular-nums]">
+                                  {shortDate(a.departureDate)} · {a.travelClass} · target{' '}
+                                  {inr(a.targetPrice)}
+                                </p>
+                                <p className="mt-1 text-xs text-ink-tertiary [font-variant-numeric:tabular-nums]">
+                                  {a.lastChecked
+                                    ? `Checked ${shortDate(a.lastChecked)} · model price ${inr(a.lastPrice)}`
+                                    : 'Not checked yet'}
+                                </p>
+                              </div>
+                              <div className="flex shrink-0 items-center gap-2">
+                                {a.triggered && <Badge variant="positive">At target</Badge>}
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={checking === a.id}
+                                  onClick={() => checkOne(a)}
+                                >
+                                  {checking === a.id ? 'Checking' : 'Check now'}
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  aria-label={`Delete alert for ${a.origin} to ${a.destination}`}
+                                  onClick={() => {
+                                    removeAlert(a.id);
+                                    refresh();
+                                    toast.success('Alert removed');
+                                  }}
+                                >
+                                  <Trash className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </TabsContent>
+
+              {/* Recent searches */}
+              <TabsContent value="searches">
+                {searches.length === 0 ? (
+                  <EmptyState
+                    as="h3"
+                    icon={<MagnifyingGlass className="h-6 w-6" />}
+                    title="No recent searches"
+                    description="Routes you look up are kept here so you can jump back to them."
+                    action={
+                      <Button asChild>
+                        <Link href="/search">Check a fare</Link>
+                      </Button>
+                    }
+                  />
+                ) : (
+                  <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
+                    {searches.map((s) => (
+                      <li key={s.id}>
+                        <Link
+                          href="/search"
+                          className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 px-5 py-4 transition-colors hover:bg-surface-hover"
+                        >
+                          <span className="font-medium text-ink">
+                            {s.origin} to {s.destination}
+                          </span>
+                          <span className="text-sm text-ink-secondary [font-variant-numeric:tabular-nums]">
+                            {shortDate(s.departureDate)} · {s.travelClass}
+                          </span>
+                          <span className="font-mono text-sm text-ink [font-variant-numeric:tabular-nums]">
+                            {inr(s.lowestPrice)}
+                          </span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </TabsContent>
+            </Tabs>
+          </>
         )}
-      </div>
-    </div>
+      </AppShell>
+      <SiteFooter />
+    </>
   );
 }

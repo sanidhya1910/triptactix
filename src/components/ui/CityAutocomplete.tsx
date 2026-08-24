@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
-import { MapPinIcon, ChevronDownIcon } from '@heroicons/react/24/outline';
+import { useState, useRef, useEffect, useId } from 'react';
+import { MapPin, CaretDown } from '@phosphor-icons/react/ssr';
 import { City, searchCities } from '@/lib/cities';
 
 // Dataset cities for ML mode
@@ -19,10 +19,21 @@ interface CityAutocompleteProps {
   value: string;
   onChange: (city: City | null, inputValue: string) => void;
   className?: string;
-  mlMode?: boolean; // New prop for ML mode
+  /** Restrict suggestions to the six routes the fare model covers. */
+  mlMode?: boolean;
+  id?: string;
+  invalid?: boolean;
 }
 
-export default function CityAutocomplete({ placeholder, value, onChange, className = '', mlMode = false }: CityAutocompleteProps) {
+export default function CityAutocomplete({
+  placeholder,
+  value,
+  onChange,
+  className = '',
+  mlMode = false,
+  id,
+  invalid = false,
+}: CityAutocompleteProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [filteredCities, setFilteredCities] = useState<City[]>([]);
   const [selectedCity, setSelectedCity] = useState<City | null>(null);
@@ -30,6 +41,9 @@ export default function CityAutocomplete({ placeholder, value, onChange, classNa
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [justSelected, setJustSelected] = useState(false);
   
+  const reactId = useId();
+  const listboxId = `city-options-${reactId}`;
+
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -40,7 +54,6 @@ export default function CityAutocomplete({ placeholder, value, onChange, classNa
   // Sync input field with inputValue state
   useEffect(() => {
     if (inputRef.current && inputRef.current.value !== inputValue) {
-      console.log('Syncing input field value from', inputRef.current.value, 'to', inputValue);
       inputRef.current.value = inputValue;
     }
   }, [inputValue]);
@@ -79,7 +92,6 @@ export default function CityAutocomplete({ placeholder, value, onChange, classNa
 
   const handleCitySelect = (city: City) => {
     const displayValue = `${city.name}, ${city.country}`;
-    console.log('Selecting city:', city.name, 'Display value:', displayValue);
     
     // Set flag to prevent blur interference
     setJustSelected(true);
@@ -141,13 +153,11 @@ export default function CityAutocomplete({ placeholder, value, onChange, classNa
   const handleBlur = (e: React.FocusEvent) => {
     // Don't interfere if we just selected a city
     if (justSelected) {
-      console.log('Skipping blur handling - just selected a city');
       return;
     }
     
     // Delay closing to allow click on dropdown items
     setTimeout(() => {
-      console.log('Blur handler - selectedCity:', selectedCity, 'inputValue:', inputValue);
       
       // If we have a selected city, keep it as is
       if (selectedCity) {
@@ -177,33 +187,37 @@ export default function CityAutocomplete({ placeholder, value, onChange, classNa
   return (
     <div className={`relative ${className}`}>
       <div className="relative">
-        <MapPinIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-neutral-400 z-10" />
+        <MapPin className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-ink-tertiary" />
         <input
           ref={inputRef}
+          id={id}
           type="text"
+          role="combobox"
+          aria-expanded={isOpen}
+          aria-controls={listboxId}
+          aria-autocomplete="list"
+          aria-invalid={invalid || undefined}
           value={inputValue}
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           onFocus={handleFocus}
           onBlur={handleBlur}
           placeholder={placeholder}
-          className={`w-full h-12 pl-10 pr-10 border-2 rounded-lg bg-white text-neutral-900 placeholder:text-neutral-500 focus:outline-none focus:ring-2 focus:ring-black/10 transition-colors ${
-            selectedCity 
-              ? 'border-green-300 focus:border-green-500' 
-              : inputValue && !selectedCity 
-              ? 'border-amber-300 focus:border-amber-500'
-              : 'border-neutral-300 focus:border-black'
+          className={`h-10 w-full rounded-md border bg-surface pl-9 pr-9 text-sm text-ink transition-colors placeholder:text-ink-tertiary focus:outline-none focus:ring-2 focus:ring-brand/15 ${
+            invalid
+              ? 'border-neg-fg focus:border-neg-fg focus:ring-neg-fg/15'
+              : selectedCity
+                ? 'border-pos-fg/40 focus:border-brand'
+                : inputValue && !selectedCity
+                  ? 'border-caution-fg/45 focus:border-caution-fg'
+                  : 'border-line-strong hover:border-ink/25 focus:border-brand'
           }`}
           autoComplete="off"
-          required
-          onInput={(e) => {
-            console.log('Input event - target.value:', (e.target as HTMLInputElement).value, 'inputValue state:', inputValue);
-          }}
         />
-        <ChevronDownIcon 
-          className={`absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-neutral-400 transition-transform ${
+        <CaretDown
+          className={`pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-tertiary transition-transform duration-200 ${
             isOpen ? 'rotate-180' : ''
-          }`} 
+          }`}
         />
       </div>
 
@@ -211,29 +225,31 @@ export default function CityAutocomplete({ placeholder, value, onChange, classNa
       {isOpen && filteredCities.length > 0 && (
         <div
           ref={listRef}
-          className="absolute z-50 w-full mt-1 bg-white border border-neutral-200 rounded-lg shadow-lg max-h-60 overflow-y-auto"
+          role="listbox"
+          id={listboxId}
+          className="absolute z-50 mt-1.5 max-h-60 w-full overflow-y-auto rounded-lg border border-line bg-surface shadow-xl"
         >
           {filteredCities.map((city, index) => (
             <div
               key={`${city.code}-${city.name}`}
               onClick={() => handleCitySelect(city)}
               onMouseDown={(e) => e.preventDefault()} // Prevent blur when clicking
-              className={`px-4 py-3 cursor-pointer border-b border-neutral-100 last:border-b-0 hover:bg-neutral-50 ${
-                index === highlightedIndex ? 'bg-neutral-100' : ''
+              role="option"
+              aria-selected={index === highlightedIndex}
+              className={`cursor-pointer border-b border-line px-4 py-3 last:border-b-0 hover:bg-surface-hover ${
+                index === highlightedIndex ? 'bg-surface-hover' : ''
               }`}
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="font-semibold text-black">
+                  <div className="font-medium text-ink">
                     {city.name}, {city.country}
                   </div>
                   {city.airport && (
-                    <div className="text-sm text-neutral-600">
-                      {city.airport}
-                    </div>
+                    <div className="mt-0.5 text-sm text-ink-secondary">{city.airport}</div>
                   )}
                 </div>
-                <div className="text-sm font-mono text-neutral-500 bg-neutral-100 px-2 py-1 rounded">
+                <div className="rounded-sm bg-surface-sunken px-2 py-1 font-mono text-xs text-ink-secondary">
                   {city.code}
                 </div>
               </div>
@@ -244,9 +260,7 @@ export default function CityAutocomplete({ placeholder, value, onChange, classNa
 
       {/* Validation message */}
       {inputValue && !selectedCity && !isOpen && (
-        <div className="absolute -bottom-6 left-0 text-sm text-amber-600">
-          Please select a valid city from the dropdown
-        </div>
+        <p className="mt-1.5 text-xs text-caution-fg">Pick a city from the list to continue.</p>
       )}
     </div>
   );

@@ -174,7 +174,7 @@ export class PerplexityItineraryService {
       // Check rate limiting
       if (!this.canMakeRequest()) {
         console.log('Rate limit reached, generating fallback itinerary...');
-        return this.generateFallbackItinerary(request, 'Rate limit reached — serving curated template instead.');
+        return this.generateFallbackItinerary(request, 'Rate limit reached, serving curated template instead.');
       }
 
       const prompt = this.buildEnhancedPrompt(request);
@@ -238,14 +238,14 @@ export class PerplexityItineraryService {
       // Check if it's a rate limit error
       if (this.isRateLimitError(error)) {
         console.log('Rate limit error detected, generating fallback itinerary...');
-        return this.generateFallbackItinerary(request, 'Perplexity rate limit exceeded — serving curated template instead.', rawResponse);
+        return this.generateFallbackItinerary(request, 'Perplexity rate limit exceeded, serving curated template instead.', rawResponse);
       }
       
       // For other errors, also provide fallback
       console.log('Perplexity error occurred, generating fallback itinerary...');
       return this.generateFallbackItinerary(
         request,
-        error instanceof Error ? error.message : 'Perplexity error occurred — using smart template.',
+        error instanceof Error ? error.message : 'Perplexity error occurred, using smart template.',
         rawResponse
       );
     }
@@ -1097,7 +1097,7 @@ ${request.includeFlight ? `- Include flights from ${request.flightSource || 'maj
       console.log('Invalid itinerary format, using fallback');
       return this.generateFallbackItinerary(
         request,
-        'Perplexity returned incomplete itinerary — using curated backup plan.',
+        'Perplexity returned incomplete itinerary, using curated backup plan.',
         rawResponse
       );
     }
@@ -1455,7 +1455,7 @@ ${request.includeFlight ? `- Include flights from ${request.flightSource || 'maj
         prices: 'Monitor flight and accommodation prices for the best deals'
       },
       isFallback: true,
-      fallbackReason: reason ?? 'Perplexity response unavailable — using smart template instead.',
+      fallbackReason: reason ?? 'Perplexity response unavailable, using smart template instead.',
       debugRawResponse: process.env.NODE_ENV !== 'production' ? debugRawResponse : undefined
     };
   }

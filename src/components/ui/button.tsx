@@ -4,22 +4,24 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/lib/utils';
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center whitespace-nowrap rounded-lg text-sm font-semibold transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-500 focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-transparent',
+  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-[background-color,border-color,color,transform] duration-200 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:pointer-events-none disabled:opacity-45',
   {
     variants: {
       variant: {
-        default: 'bg-black text-white hover:bg-neutral-800 shadow-lg hover:shadow-xl border-2 border-black hover:border-neutral-800',
-        destructive: 'bg-destructive text-white hover:bg-destructive/90 shadow-lg hover:shadow-xl border-2 border-destructive hover:border-destructive/90',
-        outline: 'border-2 border-neutral-300 bg-white text-neutral-900 hover:bg-neutral-50 hover:border-neutral-400 font-medium',
-        secondary: 'bg-neutral-700 text-white hover:bg-neutral-600 shadow-lg hover:shadow-xl border-2 border-neutral-700 hover:border-neutral-600',
-        ghost: 'text-neutral-900 hover:bg-neutral-100 hover:text-neutral-900 font-medium',
-        link: 'text-neutral-700 underline-offset-4 hover:underline hover:text-black font-medium',
+        default: 'bg-ink text-surface hover:bg-ink/90',
+        brand: 'bg-brand text-brand-fg hover:bg-brand-hover',
+        outline:
+          'border border-line-strong bg-surface text-ink hover:bg-surface-hover hover:border-ink/30',
+        secondary: 'bg-surface-sunken text-ink hover:bg-line',
+        ghost: 'text-ink-secondary hover:bg-surface-hover hover:text-ink',
+        link: 'text-brand underline-offset-4 hover:underline',
+        destructive: 'bg-destructive text-destructive-foreground hover:brightness-110',
       },
       size: {
-        default: 'h-12 px-6 py-3',
-        sm: 'h-10 rounded-lg px-4 text-sm',
-        lg: 'h-14 rounded-lg px-8 text-base font-bold',
-        icon: 'h-12 w-12',
+        sm: 'h-9 px-3.5',
+        default: 'h-10 px-5',
+        lg: 'h-12 px-7 text-base',
+        icon: 'h-10 w-10 px-0',
       },
     },
     defaultVariants: {

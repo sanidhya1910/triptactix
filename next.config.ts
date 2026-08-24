@@ -12,6 +12,10 @@ const nextConfig: NextConfig = {
   // Image optimization for static export
   images: {
     unoptimized: true,
+    remotePatterns: [
+      // Placeholder photography for the marketing page. Swap for real assets.
+      { protocol: 'https', hostname: 'picsum.photos' },
+    ],
   },
   // Temporarily disable static export to test API routes
   // output: 'export',

@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { format } from "date-fns"
-import { CalendarIcon } from "@heroicons/react/24/outline"
+import { CalendarBlank } from '@phosphor-icons/react/ssr'
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Calendar } from "@/components/ui/calendar"
@@ -66,12 +66,12 @@ export function DatePicker({
           <Button
             variant="outline"
             className={cn(
-              "w-full h-12 justify-start text-left font-normal rounded-xl border-2 border-neutral-200 focus:border-black bg-white hover:bg-white focus:outline-none focus:ring-2 focus:ring-neutral-200",
-              !date && "text-neutral-500"
+              "h-10 w-full justify-start rounded-md border border-line-strong bg-surface text-left font-normal hover:border-ink/25 hover:bg-surface focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15",
+              !date && "text-ink-tertiary"
             )}
             disabled={disabled}
           >
-            <CalendarIcon className="mr-2 h-4 w-4" />
+            <CalendarBlank className="mr-2 h-4 w-4" />
             {date ? format(date, "PPP") : <span>{placeholder}</span>}
           </Button>
         </PopoverTrigger>
@@ -157,7 +157,7 @@ export function DateRangePicker({
   return (
     <div className={cn("grid grid-cols-1 md:grid-cols-2 gap-4", className)}>
       <div className="space-y-2">
-        <label className="text-sm font-bold text-black">Departure Date</label>
+        <label className="text-sm font-medium text-ink">Departure date</label>
         <DatePicker
           date={startDate}
           onDateChange={handleStartDateChange}
@@ -169,7 +169,7 @@ export function DateRangePicker({
         />
       </div>
       <div className="space-y-2">
-        <label className="text-sm font-bold text-black">Return Date</label>
+        <label className="text-sm font-medium text-ink">Return date</label>
         <DatePicker
           date={endDate}
           onDateChange={onEndDateChange}

@@ -1,65 +1,220 @@
 @import "tailwindcss";
+@plugin "tailwindcss-animate";
 
+/* Declared now, unused this pass: dark mode becomes a value swap on :root below. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ---------------------------------------------------------------------------
+   Raw token values. Swap these under `.dark` later; every utility follows.
+   Palette: warm bone canvas, warm off-black ink, single deep-pine brand accent,
+   four muted pastels reserved for price/status semantics.
+--------------------------------------------------------------------------- */
 :root {
-  /* Elegant Black & White Theme Variables */
-  --color-white: #ffffff;
-  --color-black: #000000;
-  --color-neutral-50: #fafafa;
-  --color-neutral-100: #f5f5f5;
-  --color-neutral-200: #e5e5e5;
-  --color-neutral-300: #d4d4d4;
-  --color-neutral-400: #a3a3a3;
-  --color-neutral-500: #737373;
-  --color-neutral-600: #525252;
-  --color-neutral-700: #404040;
-  --color-neutral-800: #262626;
-  --color-neutral-900: #171717;
-  --color-neutral-950: #0a0a0a;
-  
-  /* App theme colors */
-  --background: var(--color-white);
-  --foreground: var(--color-black);
-  --primary: var(--color-black);
-  --primary-foreground: var(--color-white);
-  --secondary: var(--color-neutral-100);
-  --secondary-foreground: var(--color-neutral-900);
+  --canvas: #fbfaf8;
+  --surface: #ffffff;
+  --surface-sunken: #f4f2ee;
+  --surface-hover: #f7f5f1;
+
+  --ink: #171614;
+  /* Ramp is tuned so all three pass WCAG AA as small text on both --canvas
+     and --surface-sunken: roughly 17:1, 8.3:1 and 5.0:1. */
+  --ink-secondary: #4f4c46;
+  --ink-tertiary: #6f6c64;
+
+  --line: #e7e4de;
+  --line-strong: #d6d2ca;
+
+  --brand: #20544b;
+  --brand-hover: #194039;
+  --brand-soft: #eaf0ee;
+  --brand-fg: #ffffff;
+
+  /* Semantic pastels. Surface + text pairs, WCAG AA on their own surface. */
+  --pos: #edf3ec;
+  --pos-fg: #346538;
+  --neg: #fdebec;
+  --neg-fg: #9f2f2d;
+  --caution: #fbf3db;
+  --caution-fg: #956400;
+  --info: #e1f3fe;
+  --info-fg: #1f6c9f;
+
+  --focus: #20544b;
 }
 
-* {
-  box-sizing: border-box;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+/* ---------------------------------------------------------------------------
+   Tailwind v4 theme. `inline` keeps utilities pointing at the vars above,
+   which is what makes the palette swappable in one place.
+--------------------------------------------------------------------------- */
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-hover: var(--surface-hover);
+
+  --color-ink: var(--ink);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-ink-tertiary: var(--ink-tertiary);
+
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-soft: var(--brand-soft);
+  --color-brand-fg: var(--brand-fg);
+
+  --color-pos: var(--pos);
+  --color-pos-fg: var(--pos-fg);
+  --color-neg: var(--neg);
+  --color-neg-fg: var(--neg-fg);
+  --color-caution: var(--caution);
+  --color-caution-fg: var(--caution-fg);
+  --color-info: var(--info);
+  --color-info-fg: var(--info-fg);
+
+  /* shadcn-contract aliases. These were referenced by badge/card/dialog/tooltip
+     but never defined, so those utilities silently emitted nothing. */
+  --color-background: var(--canvas);
+  --color-foreground: var(--ink);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--ink);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--ink);
+  --color-primary: var(--ink);
+  --color-primary-foreground: var(--surface);
+  --color-secondary: var(--surface-sunken);
+  --color-secondary-foreground: var(--ink);
+  --color-muted: var(--surface-sunken);
+  --color-muted-foreground: var(--ink-secondary);
+  --color-accent: var(--surface-hover);
+  --color-accent-foreground: var(--ink);
+  --color-destructive: var(--neg-fg);
+  --color-destructive-foreground: #ffffff;
+  --color-border: var(--line);
+  --color-input: var(--line-strong);
+  --color-ring: var(--focus);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", monospace;
+  --font-display: var(--font-newsreader), Georgia, "Times New Roman", serif;
+
+  /* Shape lock: 4 micro, 6 controls, 10 cards, 14 media. Pills are for tags only. */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-2xl: 14px;
+  --radius-3xl: 14px;
+
+  /* Elevation is near-absent and warm-tinted. Larger steps are deliberately
+     capped so any leftover `shadow-lg` from the old design stays quiet. */
+  --shadow-xs: 0 1px 2px rgb(23 22 20 / 0.03);
+  --shadow-sm: 0 1px 2px rgb(23 22 20 / 0.04);
+  --shadow-md: 0 2px 8px rgb(23 22 20 / 0.05);
+  --shadow-lg: 0 2px 8px rgb(23 22 20 / 0.05);
+  --shadow-xl: 0 6px 24px rgb(23 22 20 / 0.07);
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-html, body {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
+@layer base {
+  * {
+    border-color: var(--line);
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--canvas);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 1.0625rem;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  /* Digits align in a product built on fare comparison. */
+  .tabular, table, output, time, [data-numeric] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  ::selection {
+    background-color: var(--brand);
+    color: var(--brand-fg);
+  }
+
+  ::placeholder {
+    color: var(--ink-tertiary);
+  }
 }
 
-h1, h2, h3, h4, h5, h6, p, figure {
-  margin: 0;
+@layer utilities {
+  .font-display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    letter-spacing: -0.03em;
+  }
+
+  .text-display {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(2.5rem, 5vw, 3.5rem);
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+  }
+
+  .text-display-sm {
+    font-family: var(--font-display);
+    font-weight: 400;
+    font-size: clamp(1.875rem, 3vw, 2.5rem);
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+  }
+
+  .prose-measure {
+    max-width: 65ch;
+  }
+
+  /* Fixed, pointer-events-none. Never on a scrolling container. */
+  .grain::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    pointer-events: none;
+    opacity: 0.03;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  font-size: 16px;
-  line-height: 1.5;
-  -webkit-text-size-adjust: 100%;
-}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
 
-/* Hero text alignment tweaks to avoid unintended left indent */
-.hero-container {
-  margin-left: auto;
-  margin-right: auto;
-  text-align: center;
-}
-
-.hero-subtext {
-  margin-left: auto;
-  margin-right: auto;
-  max-width: 48rem; /* ~768px */
-  text-align: center;
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

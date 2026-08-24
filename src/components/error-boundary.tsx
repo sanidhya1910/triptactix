@@ -49,37 +49,38 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 }
 
 function DefaultErrorFallback({ error, resetError }: { error: Error; resetError: () => void }) {
+  const isNetwork =
+    error.message.includes('ECONNRESET') || error.message.toLowerCase().includes('network')
+
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-      <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-6 text-center">
-        <div className="mb-4">
-          <svg className="mx-auto h-12 w-12 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
-          </svg>
-        </div>
-        <h2 className="text-xl font-semibold text-gray-900 mb-2">Oops! Something went wrong</h2>
-        <p className="text-gray-600 mb-4 text-sm">
-          {error.message.includes('ECONNRESET') || error.message.includes('network') 
-            ? 'Network connection error. Please check your internet connection and try again.'
-            : 'An unexpected error occurred. Please try refreshing the page.'
-          }
+    <main className="flex min-h-[100dvh] items-center px-5 sm:px-8">
+      <div className="mx-auto w-full max-w-lg">
+        <p className="font-mono text-sm text-ink-tertiary">Error</p>
+        <h1 className="mt-4 text-display-sm text-ink">
+          {isNetwork ? 'We lost the connection.' : 'This screen failed to load.'}
+        </h1>
+        <p className="mt-4 leading-relaxed text-ink-secondary">
+          {isNetwork
+            ? 'Check your internet connection, then try again. Nothing you saved has been lost.'
+            : 'Trying again usually clears it. If it keeps happening, the service behind this screen is probably down.'}
         </p>
-        <div className="space-x-3">
+
+        <div className="mt-9 flex flex-wrap gap-3">
           <button
             onClick={resetError}
-            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            className="inline-flex h-10 items-center justify-center rounded-md bg-ink px-5 text-sm font-medium text-surface transition-colors duration-200 hover:bg-ink/90 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-canvas"
           >
             Try again
           </button>
           <button
             onClick={() => window.location.reload()}
-            className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            className="inline-flex h-10 items-center justify-center rounded-md border border-line-strong bg-surface px-5 text-sm font-medium text-ink transition-colors duration-200 hover:border-ink/25 hover:bg-surface-hover active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-canvas"
           >
-            Refresh page
+            Reload the page
           </button>
         </div>
       </div>
-    </div>
+    </main>
   )
 }
 

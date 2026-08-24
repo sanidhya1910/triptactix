@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import { CalendarDaysIcon, SparklesIcon } from '@heroicons/react/24/outline';
+import { CalendarBlank, Sparkle } from '@phosphor-icons/react/ssr';
 import { canonicalCity } from '@/lib/cities';
 
 interface FareDay {
@@ -72,12 +72,12 @@ const fmt = (n: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n);
 
 const LEVEL_STYLE: Record<string, string> = {
-  low: 'bg-green-50 border-green-200 hover:border-green-400',
-  medium: 'bg-neutral-50 border-neutral-200 hover:border-neutral-400',
-  high: 'bg-red-50 border-red-200 hover:border-red-300',
+  low: 'bg-pos border-pos-fg/25 hover:border-pos-fg/25',
+  medium: 'bg-surface-sunken border-line hover:border-line-strong',
+  high: 'bg-neg border-neg-fg/25 hover:border-neg-fg/25',
 };
 const PRICE_STYLE: Record<string, string> = {
-  low: 'text-green-700', medium: 'text-neutral-600', high: 'text-red-700',
+  low: 'text-pos-fg', medium: 'text-ink-secondary', high: 'text-neg-fg',
 };
 
 export default function FareCalendar({
@@ -128,15 +128,15 @@ export default function FareCalendar({
     return (
       <Card className={className}>
         <CardContent className="p-6 flex items-center justify-center gap-2">
-          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-black" />
-          <span className="text-sm text-neutral-600">Building fare calendar…</span>
+          <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-ink" />
+          <span className="text-sm text-ink-secondary">Building fare calendar…</span>
         </CardContent>
       </Card>
     );
   }
   if (days.length === 0) return null;
 
-  // Group into weeks aligned to Sun–Sat columns.
+  // Group into weeks aligned to Sun-Sat columns.
   const first = new Date(days[0].date);
   const lead = first.getDay();
   const cells: (FareDay | null)[] = [...Array(lead).fill(null), ...days];
@@ -152,30 +152,30 @@ export default function FareCalendar({
     <Card className={className}>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <CalendarDaysIcon className="w-5 h-5" />
+          <CalendarBlank className="w-5 h-5" />
           <span>Cheapest Days to Fly</span>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {isMock && (
-          <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
-            <SparklesIcon className="w-4 h-4 shrink-0" />
+          <div className="flex items-center gap-2 px-3 py-2 bg-caution border border-caution-fg/25 rounded-lg text-xs text-caution-fg">
+            <Sparkle className="w-4 h-4 shrink-0" />
             Estimated calendar (ML API offline).
           </div>
         )}
 
         {cheapest && (
-          <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-green-50 border border-green-200 rounded-xl">
-            <div className="text-sm text-green-800">
+          <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-pos border border-pos-fg/25 rounded-lg">
+            <div className="text-sm text-pos-fg">
               <span className="font-semibold">Cheapest:</span>{' '}
               {new Date(cheapest.date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}
             </div>
-            <div className="text-lg font-bold text-green-700">{fmt(cheapest.predicted_price)}</div>
+            <div className="text-lg font-bold text-pos-fg">{fmt(cheapest.predicted_price)}</div>
           </div>
         )}
 
         <div>
-          <div className="grid grid-cols-7 gap-1 mb-1 text-center text-[11px] font-medium text-neutral-500">
+          <div className="grid grid-cols-7 gap-1 mb-1 text-center text-[11px] font-medium text-ink-tertiary">
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => <div key={d}>{d}</div>)}
           </div>
           <div className="space-y-1">
@@ -189,10 +189,10 @@ export default function FareCalendar({
                       key={ci}
                       type="button"
                       onClick={() => onSelectDate?.(cell.date, cell.predicted_price)}
-                      title={`${cell.day_of_week}, ${cell.date} — ${fmt(cell.predicted_price)}`}
-                      className={`rounded-lg border p-1.5 text-left transition-colors ${LEVEL_STYLE[cell.level || 'medium']} ${isCheapest ? 'ring-2 ring-black' : ''}`}
+                      title={`${cell.day_of_week}, ${cell.date}, ${fmt(cell.predicted_price)}`}
+                      className={`rounded-lg border p-1.5 text-left transition-colors ${LEVEL_STYLE[cell.level || 'medium']} ${isCheapest ? 'ring-2 ring-ink' : ''}`}
                     >
-                      <div className="text-xs font-semibold text-neutral-800">{new Date(cell.date).getDate()}</div>
+                      <div className="text-xs font-semibold text-ink">{new Date(cell.date).getDate()}</div>
                       <div className={`text-[10px] font-medium ${PRICE_STYLE[cell.level || 'medium']}`}>
                         {(cell.predicted_price / 1000).toFixed(1)}k
                       </div>
@@ -205,13 +205,13 @@ export default function FareCalendar({
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-3 text-neutral-500">
-            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-green-200 inline-block" /> Low</span>
-            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-neutral-200 inline-block" /> Avg</span>
-            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-red-200 inline-block" /> High</span>
+          <div className="flex items-center gap-3 text-ink-tertiary">
+            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-pos inline-block" /> Low</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-line inline-block" /> Avg</span>
+            <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-neg inline-block" /> High</span>
           </div>
-          <div className="text-neutral-600">
-            Range <span className="font-semibold text-green-700">{fmt(min)}</span> – <span className="font-semibold text-red-700">{fmt(max)}</span> · Avg <span className="font-semibold">{fmt(avg)}</span>
+          <div className="text-ink-secondary">
+            Range <span className="font-semibold text-pos-fg">{fmt(min)}</span> to <span className="font-semibold text-neg-fg">{fmt(max)}</span> · Avg <span className="font-semibold">{fmt(avg)}</span>
           </div>
         </div>
       </CardContent>

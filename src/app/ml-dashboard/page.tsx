@@ -3,11 +3,11 @@
 import React, { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { DatePicker } from '@/components/ui/date-picker';
 import { format } from 'date-fns';
 import { PricePredictionCard, RouteAnalyticsCard } from '@/components/charts/MLInsightsCard';
-import { Navbar } from '@/components/layout/Navbar';
+import { AppShell } from '@/components/layout/AppShell';
+import { SiteFooter } from '@/components/layout/SiteFooter';
 
 interface DashboardInsights {
   totalRoutes: number;
@@ -147,73 +147,70 @@ export default function MLDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-neutral-50">
-      <Navbar currentPage="ml-dashboard" showGetStarted={false} />
-    
-    <div className="max-w-7xl mx-auto p-6 space-y-6 pt-24">
-      <div className="text-center mb-8">
-        <h1 className="text-3xl md:text-4xl font-bold text-black mb-2">
-          AI-Powered Flight Analytics
-        </h1>
-        <p className="text-neutral-600">
-          Leveraging 600,000+ historical flight records for intelligent price predictions and travel insights
+    <>
+      <AppShell width="wide" className="space-y-8">
+      <header className="max-w-2xl">
+        <h1 className="text-display-sm text-ink">Fare data</h1>
+        <p className="mt-3 text-ink-secondary">
+          What the model learned from 600,000 historical bookings: route pricing, airline share,
+          and when a fare is usually at its lowest.
         </p>
-      </div>
+      </header>
 
       {/* Dashboard Overview */}
       {dashboardInsights && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <Card className="p-5 text-center bg-white border-neutral-200">
-            <div className="text-2xl font-bold text-black">
+          <Card className="p-5 text-center bg-surface border-line">
+            <div className="text-2xl font-bold text-ink">
               {dashboardInsights.totalFlights.toLocaleString()}
             </div>
-            <div className="text-sm text-neutral-600 mt-1">Total Flight Records</div>
+            <div className="text-sm text-ink-secondary mt-1">Flight records</div>
           </Card>
 
-          <Card className="p-5 text-center bg-white border-neutral-200">
-            <div className="text-2xl font-bold text-black">
+          <Card className="p-5 text-center bg-surface border-line">
+            <div className="text-2xl font-bold text-ink">
               {dashboardInsights.totalRoutes}
             </div>
-            <div className="text-sm text-neutral-600 mt-1">Routes Analyzed</div>
+            <div className="text-sm text-ink-secondary mt-1">Routes Analyzed</div>
           </Card>
 
-          <Card className="p-5 text-center bg-white border-neutral-200">
-            <div className="text-2xl font-bold text-black">
+          <Card className="p-5 text-center bg-surface border-line">
+            <div className="text-2xl font-bold text-ink">
               ₹{dashboardInsights.averagePriceAcrossRoutes.toLocaleString()}
             </div>
-            <div className="text-sm text-neutral-600 mt-1">Average Price</div>
+            <div className="text-sm text-ink-secondary mt-1">Average Price</div>
           </Card>
 
-          <Card className="p-5 text-center bg-white border-neutral-200">
-            <div className="text-xl font-bold text-black">
+          <Card className="p-5 text-center bg-surface border-line">
+            <div className="text-xl font-bold text-ink">
               {dashboardInsights.mostPopularRoute}
             </div>
-            <div className="text-sm text-neutral-600 mt-1">Most Popular Route</div>
+            <div className="text-sm text-ink-secondary mt-1">Busiest route</div>
           </Card>
         </div>
       )}
 
       {/* Top Airlines */}
       {dashboardInsights && (
-        <Card className="p-6 mb-8 bg-white border-neutral-200">
-          <h3 className="text-xl font-semibold text-black mb-4">Market Share by Airline</h3>
+        <Card className="p-6 mb-8 bg-surface border-line">
+          <h2 className="mb-4 text-xl font-semibold text-ink">Market share by airline</h2>
           <div className="space-y-3">
             {dashboardInsights.topAirlines.map((airline, index) => {
-              const shade = ['bg-black', 'bg-neutral-700', 'bg-neutral-500', 'bg-neutral-400', 'bg-neutral-300'][index] || 'bg-neutral-300';
+              const shade = ['bg-brand', 'bg-brand/75', 'bg-brand/55', 'bg-brand/35', 'bg-brand/20'][index] || 'bg-line';
               return (
               <div key={index} className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className={`w-3 h-3 rounded-full ${shade}`}></div>
-                  <span className="font-medium text-neutral-800">{airline.airline}</span>
+                  <span className="font-medium text-ink">{airline.airline}</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <div className="w-32 h-2 bg-neutral-200 rounded-full overflow-hidden">
+                  <div className="w-32 h-2 bg-line rounded-full overflow-hidden">
                     <div
                       className={`h-full rounded-full ${shade}`}
                       style={{ width: `${airline.marketShare}%` }}
                     ></div>
                   </div>
-                  <span className="text-sm font-medium text-neutral-600 w-12">
+                  <span className="text-sm font-medium text-ink-secondary w-12">
                     {airline.marketShare}%
                   </span>
                 </div>
@@ -225,14 +222,14 @@ export default function MLDashboard() {
 
       {/* ML Search Form */}
       <Card className="p-6 mb-8">
-        <h3 className="text-xl font-semibold text-black mb-4">Get AI Price Predictions</h3>
+        <h2 className="mb-4 text-xl font-semibold text-ink">Predict a fare</h2>
         <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <div>
-            <label className="block text-sm font-medium text-neutral-700 mb-2">From</label>
+            <label className="block text-sm font-medium text-ink-secondary mb-2">From</label>
             <select
               value={searchForm.from}
               onChange={(e) => setSearchForm(prev => ({ ...prev, from: e.target.value }))}
-              className="w-full p-2 border border-neutral-300 rounded-md focus:ring-2 focus:ring-neutral-500 focus:border-neutral-500"
+              className="w-full p-2 border border-line-strong rounded-md focus:ring-2 focus:ring-brand/15 focus:border-brand"
             >
               <option value="New Delhi">New Delhi</option>
               <option value="Mumbai">Mumbai</option>
@@ -244,11 +241,11 @@ export default function MLDashboard() {
           </div>
           
           <div>
-            <label className="block text-sm font-medium text-neutral-700 mb-2">To</label>
+            <label className="block text-sm font-medium text-ink-secondary mb-2">To</label>
             <select
               value={searchForm.to}
               onChange={(e) => setSearchForm(prev => ({ ...prev, to: e.target.value }))}
-              className="w-full p-2 border border-neutral-300 rounded-md focus:ring-2 focus:ring-neutral-500 focus:border-neutral-500"
+              className="w-full p-2 border border-line-strong rounded-md focus:ring-2 focus:ring-brand/15 focus:border-brand"
             >
               <option value="Mumbai">Mumbai</option>
               <option value="New Delhi">New Delhi</option>
@@ -260,7 +257,7 @@ export default function MLDashboard() {
           </div>
           
           <div>
-            <label className="block text-sm font-medium text-neutral-700 mb-2">Departure Date</label>
+            <label className="block text-sm font-medium text-ink-secondary mb-2">Departure Date</label>
             <DatePicker
               date={departureDate}
               onDateChange={(date) => date && setDepartureDate(date)}
@@ -270,11 +267,11 @@ export default function MLDashboard() {
           </div>
           
           <div>
-            <label className="block text-sm font-medium text-neutral-700 mb-2">Airline (Optional)</label>
+            <label className="block text-sm font-medium text-ink-secondary mb-2">Airline (Optional)</label>
             <select
               value={searchForm.airline}
               onChange={(e) => setSearchForm(prev => ({ ...prev, airline: e.target.value }))}
-              className="w-full p-2 border border-neutral-300 rounded-md focus:ring-2 focus:ring-neutral-500 focus:border-neutral-500"
+              className="w-full p-2 border border-line-strong rounded-md focus:ring-2 focus:ring-brand/15 focus:border-brand"
             >
               <option value="">Any Airline</option>
               <option value="IndiGo">IndiGo</option>
@@ -311,20 +308,20 @@ export default function MLDashboard() {
           )}
           
           {priceRecommendations && (
-            <Card className="p-4 bg-white border-neutral-200">
-              <h4 className="text-lg font-semibold text-black mb-3">Price Recommendations</h4>
+            <Card className="p-4 bg-surface border-line">
+              <h2 className="text-lg font-semibold text-ink mb-3">Price recommendations</h2>
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-neutral-600">Best Price Found:</span>
-                  <span className="font-bold text-green-700">₹{priceRecommendations.bestPrice.toLocaleString()}</span>
+                  <span className="text-sm text-ink-secondary">Best Price Found:</span>
+                  <span className="font-bold text-pos-fg">₹{priceRecommendations.bestPrice.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-neutral-600">Worst Price Found:</span>
-                  <span className="font-bold text-red-600">₹{priceRecommendations.worstPrice.toLocaleString()}</span>
+                  <span className="text-sm text-ink-secondary">Worst Price Found:</span>
+                  <span className="font-bold text-neg-fg">₹{priceRecommendations.worstPrice.toLocaleString()}</span>
                 </div>
-                <div className="bg-neutral-50 rounded-lg p-3 border border-neutral-200">
-                  <p className="text-sm text-neutral-700">
-                    <span className="font-medium">📅 Best Booking Window:</span> {priceRecommendations.recommendedBookingWindow}
+                <div className="bg-surface-sunken rounded-lg p-3 border border-line">
+                  <p className="text-sm text-ink-secondary">
+                    <span className="font-medium text-ink">Best booking window:</span> {priceRecommendations.recommendedBookingWindow}
                   </p>
                 </div>
               </div>
@@ -343,23 +340,23 @@ export default function MLDashboard() {
       {/* Price History Chart */}
       {priceRecommendations && priceRecommendations.priceHistory.length > 0 && (
         <Card className="p-6">
-          <h3 className="text-xl font-semibold text-black mb-4">Price History by Booking Window</h3>
+          <h2 className="text-xl font-semibold text-ink mb-4">Price history by booking window</h2>
           <div className="space-y-2">
             {priceRecommendations.priceHistory.slice(0, 8).map((item, index) => (
               <div key={index} className="flex items-center justify-between py-2">
-                <span className="text-sm text-neutral-600">
+                <span className="text-sm text-ink-secondary">
                   {item.daysLeft} days before
                 </span>
                 <div className="flex items-center gap-3">
-                  <div className="w-32 h-2 bg-neutral-200 rounded-full overflow-hidden">
+                  <div className="w-32 h-2 bg-line rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-black rounded-full"
+                      className="h-full bg-ink rounded-full"
                       style={{
                         width: `${(item.averagePrice / Math.max(...priceRecommendations.priceHistory.map(p => p.averagePrice))) * 100}%`
                       }}
                     ></div>
                   </div>
-                  <span className="text-sm font-medium text-black w-20">
+                  <span className="text-sm font-medium text-ink w-20">
                     ₹{item.averagePrice.toLocaleString()}
                   </span>
                 </div>
@@ -371,19 +368,19 @@ export default function MLDashboard() {
 
       {/* Route Intelligence */}
       {routeIntel && routeIntel.totalFlights > 0 && (
-        <Card className="p-6 bg-white border-neutral-200">
+        <Card className="p-6 bg-surface border-line">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
-            <h3 className="text-xl font-semibold text-black">Route Intelligence — {routeIntel.route}</h3>
-            <span className="text-xs text-neutral-500">{routeIntel.totalFlights.toLocaleString()} economy records</span>
+            <h2 className="text-xl font-semibold text-ink">Route detail, {routeIntel.route}</h2>
+            <span className="text-xs text-ink-tertiary">{routeIntel.totalFlights.toLocaleString()} economy records</span>
           </div>
           <div className="flex flex-wrap gap-2 mb-6 text-xs">
-            <span className="px-2 py-1 rounded-full bg-green-50 border border-green-200 text-green-700">
+            <span className="px-2 py-1 rounded-full bg-pos border border-pos-fg/25 text-pos-fg">
               Cheapest airline: <b>{routeIntel.cheapestAirline}</b>
             </span>
-            <span className="px-2 py-1 rounded-full bg-neutral-100 border border-neutral-200 text-neutral-700">
+            <span className="px-2 py-1 rounded-full bg-surface-sunken border border-line text-ink-secondary">
               Cheapest time: <b>{routeIntel.cheapestTimeSlot}</b>
             </span>
-            <span className="px-2 py-1 rounded-full bg-neutral-100 border border-neutral-200 text-neutral-700">
+            <span className="px-2 py-1 rounded-full bg-surface-sunken border border-line text-ink-secondary">
               Best window: <b>{routeIntel.cheapestBookingWindow}</b>
             </span>
           </div>
@@ -391,18 +388,18 @@ export default function MLDashboard() {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Airline positioning */}
             <div>
-              <h4 className="text-sm font-semibold text-neutral-800 mb-3">Airline Price Positioning</h4>
+              <h3 className="text-sm font-semibold text-ink mb-3">Airline price positioning</h3>
               <div className="space-y-2">
                 {(() => {
                   const max = Math.max(...routeIntel.airlinePositioning.map(a => a.avgPrice), 1);
                   return routeIntel.airlinePositioning.map((a, i) => (
                     <div key={a.airline} className="text-xs">
                       <div className="flex justify-between mb-0.5">
-                        <span className="text-neutral-700">{a.airline}</span>
-                        <span className="font-medium text-black">₹{a.avgPrice.toLocaleString()}</span>
+                        <span className="text-ink-secondary">{a.airline}</span>
+                        <span className="font-medium text-ink">₹{a.avgPrice.toLocaleString()}</span>
                       </div>
-                      <div className="h-2 bg-neutral-100 rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full ${i === 0 ? 'bg-green-500' : 'bg-black'}`} style={{ width: `${(a.avgPrice / max) * 100}%` }} />
+                      <div className="h-2 bg-surface-sunken rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full ${i === 0 ? 'bg-pos-fg' : 'bg-ink'}`} style={{ width: `${(a.avgPrice / max) * 100}%` }} />
                       </div>
                     </div>
                   ));
@@ -412,18 +409,18 @@ export default function MLDashboard() {
 
             {/* Time-slot pricing */}
             <div>
-              <h4 className="text-sm font-semibold text-neutral-800 mb-3">Pricing by Departure Time</h4>
+              <h3 className="text-sm font-semibold text-ink mb-3">Pricing by departure time</h3>
               <div className="space-y-2">
                 {(() => {
                   const max = Math.max(...routeIntel.timeSlotPricing.map(s => s.avgPrice), 1);
                   return routeIntel.timeSlotPricing.map((s, i) => (
                     <div key={s.slot} className="text-xs">
                       <div className="flex justify-between mb-0.5">
-                        <span className="text-neutral-700">{s.slot}</span>
-                        <span className="font-medium text-black">₹{s.avgPrice.toLocaleString()}</span>
+                        <span className="text-ink-secondary">{s.slot}</span>
+                        <span className="font-medium text-ink">₹{s.avgPrice.toLocaleString()}</span>
                       </div>
-                      <div className="h-2 bg-neutral-100 rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full ${i === 0 ? 'bg-green-500' : 'bg-black'}`} style={{ width: `${(s.avgPrice / max) * 100}%` }} />
+                      <div className="h-2 bg-surface-sunken rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full ${i === 0 ? 'bg-pos-fg' : 'bg-ink'}`} style={{ width: `${(s.avgPrice / max) * 100}%` }} />
                       </div>
                     </div>
                   ));
@@ -433,7 +430,7 @@ export default function MLDashboard() {
 
             {/* Booking window */}
             <div>
-              <h4 className="text-sm font-semibold text-neutral-800 mb-3">Price by Booking Window</h4>
+              <h3 className="text-sm font-semibold text-ink mb-3">Price by booking window</h3>
               <div className="space-y-2">
                 {(() => {
                   const max = Math.max(...routeIntel.bookingWindow.map(b => b.avgPrice), 1);
@@ -441,11 +438,11 @@ export default function MLDashboard() {
                   return routeIntel.bookingWindow.map((b) => (
                     <div key={b.bucket} className="text-xs">
                       <div className="flex justify-between mb-0.5">
-                        <span className="text-neutral-700">{b.bucket}</span>
-                        <span className="font-medium text-black">₹{b.avgPrice.toLocaleString()}</span>
+                        <span className="text-ink-secondary">{b.bucket}</span>
+                        <span className="font-medium text-ink">₹{b.avgPrice.toLocaleString()}</span>
                       </div>
-                      <div className="h-2 bg-neutral-100 rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full ${b.avgPrice === best ? 'bg-green-500' : 'bg-black'}`} style={{ width: `${(b.avgPrice / max) * 100}%` }} />
+                      <div className="h-2 bg-surface-sunken rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full ${b.avgPrice === best ? 'bg-pos-fg' : 'bg-ink'}`} style={{ width: `${(b.avgPrice / max) * 100}%` }} />
                       </div>
                     </div>
                   ));
@@ -457,41 +454,39 @@ export default function MLDashboard() {
       )}
 
       {/* How It Works */}
-      <Card className="p-6 bg-neutral-50 border-neutral-200">
-        <h3 className="text-xl font-semibold text-black mb-4">How Our AI Works</h3>
+      <Card className="p-6 bg-surface-sunken border-line">
+        <h2 className="mb-4 text-xl font-semibold text-ink">How the model works</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="text-center">
-            <div className="w-16 h-16 bg-black rounded-full flex items-center justify-center mx-auto mb-3">
-              <span className="text-2xl">📊</span>
-            </div>
-            <h4 className="font-semibold text-black mb-2">Historical Analysis</h4>
-            <p className="text-sm text-neutral-600">
+            <div className="w-16 h-16 bg-ink rounded-full flex items-center justify-center mx-auto mb-3">
+                          </div>
+            <h3 className="mb-2 font-semibold text-ink">Historical analysis</h3>
+            <p className="text-sm text-ink-secondary">
               Analyzes 600,000+ flight records to understand pricing patterns across routes, airlines, classes, and time periods.
             </p>
           </div>
 
           <div className="text-center">
-            <div className="w-16 h-16 bg-black rounded-full flex items-center justify-center mx-auto mb-3">
-              <span className="text-2xl">🤖</span>
-            </div>
-            <h4 className="font-semibold text-black mb-2">Smart Predictions</h4>
-            <p className="text-sm text-neutral-600">
-              A gradient-boosting model predicts fares from booking window, seasonality, class, and route — with honest confidence intervals.
+            <div className="w-16 h-16 bg-ink rounded-full flex items-center justify-center mx-auto mb-3">
+                          </div>
+            <h3 className="mb-2 font-semibold text-ink">Predictions</h3>
+            <p className="text-sm text-ink-secondary">
+              A gradient-boosting model predicts fares from booking window, seasonality, class, and route, with honest confidence intervals.
             </p>
           </div>
 
           <div className="text-center">
-            <div className="w-16 h-16 bg-black rounded-full flex items-center justify-center mx-auto mb-3">
-              <span className="text-2xl">💡</span>
-            </div>
-            <h4 className="font-semibold text-black mb-2">Actionable Insights</h4>
-            <p className="text-sm text-neutral-600">
+            <div className="w-16 h-16 bg-ink rounded-full flex items-center justify-center mx-auto mb-3">
+                          </div>
+            <h3 className="mb-2 font-semibold text-ink">What to do about it</h3>
+            <p className="text-sm text-ink-secondary">
               Provides personalized recommendations on when to book and flags the best deals against the predicted price for your date.
             </p>
           </div>
         </div>
       </Card>
-    </div>
-    </div>
+      </AppShell>
+      <SiteFooter />
+    </>
   );
 }

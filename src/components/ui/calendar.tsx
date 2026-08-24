@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import Calendar, { CalendarProps as ReactCalendarProps } from "react-calendar"
-import { ChevronLeftIcon, ChevronRightIcon } from "@heroicons/react/24/outline"
 import { cn } from "@/lib/utils"
 import 'react-calendar/dist/Calendar.css'
 
@@ -83,7 +82,7 @@ function CalendarComponent({
         
         .react-calendar button:enabled:hover,
         .react-calendar button:enabled:focus {
-          background-color: #f5f5f5;
+          background-color: var(--surface-sunken);
         }
         
         .react-calendar__navigation {
@@ -97,18 +96,18 @@ function CalendarComponent({
           background: none;
           font-size: 16px;
           font-weight: 600;
-          color: #000;
+          color: var(--ink);
         }
         
         .react-calendar__navigation button:enabled:hover,
         .react-calendar__navigation button:enabled:focus {
-          background-color: #f5f5f5;
+          background-color: var(--surface-sunken);
           border-radius: 6px;
         }
         
         .react-calendar__navigation button[disabled] {
-          background-color: #f0f0f0;
-          color: #a3a3a3;
+          background-color: var(--surface-hover);
+          color: var(--ink-tertiary);
         }
         
         .react-calendar__navigation__label {
@@ -154,7 +153,7 @@ function CalendarComponent({
           text-transform: uppercase;
           font-size: 0.75rem;
           font-weight: bold;
-          color: #737373;
+          color: var(--ink-secondary);
         }
         
         .react-calendar__month-view__weekdays__weekday {
@@ -167,15 +166,15 @@ function CalendarComponent({
           justify-content: center;
           font-size: 0.75em;
           font-weight: bold;
-          color: #737373;
+          color: var(--ink-secondary);
         }
         
         .react-calendar__month-view__days__day--weekend {
-          color: #000;
+          color: var(--ink);
         }
         
         .react-calendar__month-view__days__day--neighboringMonth {
-          color: #a3a3a3;
+          color: var(--ink-tertiary);
         }
         
         .react-calendar__year-view .react-calendar__tile,
@@ -192,56 +191,56 @@ function CalendarComponent({
           line-height: 16px;
           font-size: 0.875rem;
           border-radius: 6px;
-          color: #000;
+          color: var(--ink);
           cursor: pointer;
           pointer-events: auto;
           transition: background-color 0.2s ease;
         }
         
         .react-calendar__tile:disabled {
-          background-color: #f0f0f0;
-          color: #a3a3a3;
+          background-color: var(--surface-hover);
+          color: var(--ink-tertiary);
           cursor: not-allowed;
         }
         
         .react-calendar__tile:enabled:hover,
         .react-calendar__tile:enabled:focus {
-          background-color: #f5f5f5;
+          background-color: var(--surface-sunken);
           transform: none;
         }
         
         .react-calendar__tile--now {
-          background: #f5f5f5;
+          background: var(--surface-sunken);
           font-weight: 600;
         }
         
         .react-calendar__tile--now:enabled:hover,
         .react-calendar__tile--now:enabled:focus {
-          background: #e5e5e5;
+          background: var(--line);
         }
         
         .react-calendar__tile--hasActive {
-          background: #000;
+          background: var(--ink);
           color: white;
         }
         
         .react-calendar__tile--hasActive:enabled:hover,
         .react-calendar__tile--hasActive:enabled:focus {
-          background: #262626;
+          background: var(--ink);
         }
         
         .react-calendar__tile--active {
-          background: #000;
+          background: var(--ink);
           color: white;
         }
         
         .react-calendar__tile--active:enabled:hover,
         .react-calendar__tile--active:enabled:focus {
-          background: #262626;
+          background: var(--ink);
         }
         
         .react-calendar--selectRange .react-calendar__tile--hover {
-          background-color: #e5e5e5;
+          background-color: var(--line);
         }
         
         .react-calendar__month-view__days {

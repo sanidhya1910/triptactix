@@ -1,49 +1,57 @@
-'use client'
+'use client';
 
-import { useEffect } from 'react'
+import { useEffect } from 'react';
+import { fontClassNames } from '@/lib/fonts';
+// This boundary renders its own <html>/<body>, so it has to pull the stylesheet
+// in itself. Without this it fell back to unstyled browser defaults.
+import './globals.css';
 
 export default function GlobalError({
   error,
   reset,
 }: {
-  error: Error & { digest?: string }
-  reset: () => void
+  error: Error & { digest?: string };
+  reset: () => void;
 }) {
   useEffect(() => {
-    // Log the error to an error reporting service
-    console.error('Global error caught:', error)
-    
-    // Handle specific network errors
-    if (error.message.includes('ECONNRESET') || 
-        error.message.includes('ETIMEDOUT') || 
-        error.message.includes('ECONNREFUSED')) {
-      console.warn('Network connection error:', error.message)
+    console.error('Global error caught:', error);
+
+    if (
+      error.message.includes('ECONNRESET') ||
+      error.message.includes('ETIMEDOUT') ||
+      error.message.includes('ECONNREFUSED')
+    ) {
+      console.warn('Network connection error:', error.message);
     }
-  }, [error])
+  }, [error]);
 
   return (
-    <html>
-      <body>
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-          <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-6 text-center">
-            <div className="mb-4">
-              <svg className="mx-auto h-12 w-12 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
-              </svg>
-            </div>
-            <h2 className="text-xl font-semibold text-gray-900 mb-2">Something went wrong!</h2>
-            <p className="text-gray-600 mb-6">
-              We encountered an unexpected error. This might be due to a temporary network issue or service unavailability.
+    <html lang="en" className={fontClassNames}>
+      <body className="bg-canvas text-ink">
+        <main className="flex min-h-[100dvh] items-center px-5 sm:px-8">
+          <div className="mx-auto w-full max-w-lg">
+            <p className="font-mono text-sm text-ink-tertiary">Error</p>
+            <h1 className="mt-4 text-display-sm text-ink">The app failed to load.</h1>
+            <p className="mt-4 leading-relaxed text-ink-secondary">
+              This is usually a temporary network problem rather than something wrong with your
+              trip. Reloading normally clears it.
             </p>
+
             <button
               onClick={reset}
-              className="inline-flex items-center px-4 py-2 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              className="mt-9 inline-flex h-10 items-center justify-center rounded-md bg-ink px-5 text-sm font-medium text-surface transition-colors duration-200 hover:bg-ink/90 active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-canvas"
             >
               Try again
             </button>
+
+            {error.digest && (
+              <p className="mt-10 font-mono text-xs text-ink-tertiary">
+                Reference {error.digest}
+              </p>
+            )}
           </div>
-        </div>
+        </main>
       </body>
     </html>
-  )
+  );
 }

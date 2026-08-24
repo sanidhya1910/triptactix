@@ -9,30 +9,34 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { DatePicker } from '@/components/ui/date-picker';
 import { format } from 'date-fns';
-import { Navbar } from '@/components/layout/Navbar';
+import { toast } from 'sonner';
+import { AppShell } from '@/components/layout/AppShell';
+import { SiteFooter } from '@/components/layout/SiteFooter';
+import { Skeleton } from '@/components/ui/skeleton';
 import { 
-  SparklesIcon,
-  MapPinIcon,
-  CalendarDaysIcon,
-  UsersIcon,
-  CurrencyRupeeIcon,
-  ClockIcon,
-  StarIcon,
-  ArrowRightIcon,
-  BuildingOfficeIcon,
-  CameraIcon,
-  ShoppingBagIcon,
-  HeartIcon,
-  CheckIcon,
-  PaperAirplaneIcon,
-  GlobeAltIcon,
-  FireIcon,
-  ExclamationTriangleIcon
-} from '@heroicons/react/24/outline';
+  Sparkle,
+  MapPin,
+  CalendarBlank,
+  Users,
+  CurrencyInr,
+  Clock,
+  Star,
+  ArrowRight,
+  Buildings,
+  Camera,
+  ShoppingBag,
+  Heart,
+  Check,
+  AirplaneTilt,
+  Fire,
+  Warning
+} from '@phosphor-icons/react/ssr';
 import CityAutocomplete from '@/components/ui/CityAutocomplete';
 import { City } from '@/lib/cities';
 import { motion, AnimatePresence } from 'framer-motion';
 import { GeneratedItinerary } from '@/lib/perplexity-service';
+
+type PlannerErrors = Partial<Record<'destination' | 'startDate' | 'endDate' | 'source', string>>;
 import { saveTrip } from '@/lib/saved-trips';
 
 interface ItineraryFormData {
@@ -99,6 +103,7 @@ const getGroupTravelerRules = (groupType: ItineraryFormData['groupType']): Trave
 };
 
 export default function EnhancedItineraryPage() {
+  const [errors, setErrors] = useState<PlannerErrors>({});
   const [isGenerating, setIsGenerating] = useState(false);
   const [hasItinerary, setHasItinerary] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
@@ -209,24 +214,22 @@ export default function EnhancedItineraryPage() {
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!destinationCity) {
-      alert('Please select a valid destination');
-      return;
-    }
-    
-    if (!startDate) {
-      alert('Please select a start date');
-      return;
-    }
-    
-    if (!endDate) {
-      alert('Please select an end date');
-      return;
-    }
-    
+
+    // Validation surfaces next to the offending field. It used to be four
+    // consecutive window.alert() calls.
+    const nextErrors: PlannerErrors = {};
+    if (!destinationCity) nextErrors.destination = 'Pick a destination from the list.';
+    if (!startDate) nextErrors.startDate = 'Choose a start date.';
+    if (!endDate) nextErrors.endDate = 'Choose an end date.';
     if (formData.includeFlight && !sourceCity) {
-      alert('Please select your departure city');
+      nextErrors.source = 'Pick the city you are flying from.';
+    }
+
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      toast.error('Some details are missing', {
+        description: 'Check the highlighted fields and try again.',
+      });
       return;
     }
     
@@ -235,9 +238,9 @@ export default function EnhancedItineraryPage() {
 
     try {
       const requestData = {
-        destination: destinationCity.name,
-        startDate: format(startDate, 'yyyy-MM-dd'),
-        endDate: format(endDate, 'yyyy-MM-dd'),
+        destination: destinationCity!.name,
+        startDate: format(startDate!, 'yyyy-MM-dd'),
+        endDate: format(endDate!, 'yyyy-MM-dd'),
         budget: formData.budget,
         travelers: formData.travelers,
         interests: formData.interests,
@@ -279,7 +282,9 @@ export default function EnhancedItineraryPage() {
       
     } catch (error) {
       console.error('Error generating itinerary:', error);
-      alert('Failed to generate itinerary. Please try again.');
+      toast.error("We couldn't build that itinerary", {
+        description: 'The planning service did not respond. Please try again.',
+      });
     } finally {
       setIsGenerating(false);
     }
@@ -288,51 +293,51 @@ export default function EnhancedItineraryPage() {
   const getBudgetInfo = (budget: string) => {
     switch (budget) {
       case 'budget':
-        return { color: 'bg-green-100 text-green-800', range: '₹2,000-4,000/day', icon: '₹' };
+        return { color: 'bg-pos text-pos-fg', range: '₹2,000-4,000/day', icon: '₹' };
       case 'mid-range':
-        return { color: 'bg-blue-100 text-blue-800', range: '₹4,000-8,000/day', icon: '₹₹' };
+        return { color: 'bg-info text-info-fg', range: '₹4,000-8,000/day', icon: '₹₹' };
       case 'luxury':
-        return { color: 'bg-purple-100 text-purple-800', range: '₹8,000+/day', icon: '₹₹₹' };
+        return { color: 'bg-info text-info-fg', range: '₹8,000+/day', icon: '₹₹₹' };
       default:
-        return { color: 'bg-gray-100 text-gray-800', range: '', icon: '' };
+        return { color: 'bg-surface-sunken text-ink', range: '', icon: '' };
     }
   };
 
   const getActivityIcon = (category: string) => {
     switch (category) {
       case 'sightseeing':
-        return <CameraIcon className="w-5 h-5" />;
+        return <Camera className="w-5 h-5" />;
       case 'food':
-        return <HeartIcon className="w-5 h-5" />;
+        return <Heart className="w-5 h-5" />;
       case 'accommodation':
-        return <BuildingOfficeIcon className="w-5 h-5" />;
+        return <Buildings className="w-5 h-5" />;
       case 'transport':
-        return <ArrowRightIcon className="w-5 h-5" />;
+        return <ArrowRight className="w-5 h-5" />;
       case 'shopping':
-        return <ShoppingBagIcon className="w-5 h-5" />;
+        return <ShoppingBag className="w-5 h-5" />;
       case 'activity':
-        return <StarIcon className="w-5 h-5" />;
+        return <Star className="w-5 h-5" />;
       default:
-        return <MapPinIcon className="w-5 h-5" />;
+        return <MapPin className="w-5 h-5" />;
     }
   };
 
   const getActivityColor = (category: string) => {
     switch (category) {
       case 'sightseeing':
-        return 'bg-blue-100 text-blue-800';
+        return 'bg-info text-info-fg';
       case 'food':
-        return 'bg-red-100 text-red-800';
+        return 'bg-neg text-neg-fg';
       case 'accommodation':
-        return 'bg-purple-100 text-purple-800';
+        return 'bg-info text-info-fg';
       case 'transport':
-        return 'bg-gray-100 text-gray-800';
+        return 'bg-surface-sunken text-ink';
       case 'shopping':
-        return 'bg-pink-100 text-pink-800';
+        return 'bg-caution text-caution-fg';
       case 'activity':
-        return 'bg-green-100 text-green-800';
+        return 'bg-pos text-pos-fg';
       default:
-        return 'bg-neutral-100 text-neutral-800';
+        return 'bg-surface-sunken text-ink';
     }
   };
 
@@ -352,126 +357,128 @@ export default function EnhancedItineraryPage() {
   };
 
   if (isGenerating) {
+    // A skeleton of the result layout, so the wait previews the shape of the answer.
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
-        <motion.div 
-          className="text-center"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-        >
-          <div className="relative">
-            <div className="w-20 h-20 bg-black rounded-full flex items-center justify-center mx-auto mb-8">
-              <SparklesIcon className="w-10 h-10 text-white animate-pulse" />
+      <>
+        <AppShell width="wide">
+          <div aria-live="polite" aria-busy="true">
+            <span className="sr-only">Generating your itinerary</span>
+            <h1 className="text-display-sm text-ink">Building your itinerary</h1>
+            <p className="mt-3 text-ink-secondary">
+              Pulling activities, stays and live flight prices for your dates.
+            </p>
+
+            <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+              {[0, 1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-28" />
+              ))}
             </div>
-            <div className="absolute inset-0 w-20 h-20 bg-black rounded-full mx-auto animate-ping opacity-20"></div>
+
+            <div className="mt-8 space-y-5">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="rounded-lg border border-line bg-surface p-6">
+                  <Skeleton className="h-5 w-40" />
+                  <div className="mt-6 space-y-4">
+                    {[0, 1, 2].map((j) => (
+                      <div key={j} className="flex items-center gap-4">
+                        <Skeleton className="h-4 w-12" />
+                        <Skeleton className="h-4 flex-1" />
+                        <Skeleton className="h-4 w-16" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-          <h2 className="text-3xl font-bold text-black mb-4">
-            Creating Your Perfect Itinerary
-          </h2>
-          <p className="text-gray-600 mb-8 max-w-md mx-auto">
-            Our AI is crafting personalized experiences with real-time pricing from the best sources...
-          </p>
-          <div className="flex items-center justify-center space-x-2">
-            <div className="w-3 h-3 bg-black rounded-full animate-bounce"></div>
-            <div className="w-3 h-3 bg-neutral-600 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-            <div className="w-3 h-3 bg-neutral-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-          </div>
-        </motion.div>
-      </div>
+        </AppShell>
+        <SiteFooter />
+      </>
     );
   }
 
   return (
-    <div className="min-h-screen bg-white">
-      <Navbar currentPage="itinerary" showGetStarted={false} />
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 pt-24">
+    <>
+      <AppShell width="wide">
         {!hasItinerary ? (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-          >
-            {/* Header */}
-            <div className="text-center mb-12">
-              <div className="w-16 h-16 bg-black rounded-full flex items-center justify-center mx-auto mb-6">
-                <SparklesIcon className="w-8 h-8 text-white" />
-              </div>
-              <h1 className="text-5xl font-bold text-black mb-4">
-                AI-Powered Trip Planner
-              </h1>
-              <p className="text-xl text-neutral-600 max-w-3xl mx-auto">
-                Get personalized itineraries with real flight prices, hotel recommendations, and AI-curated experiences
+          <div>
+            <header className="max-w-2xl">
+              <h1 className="text-display-sm text-ink">Plan a trip</h1>
+              <p className="mt-3 text-ink-secondary">
+                Tell us where, when and how you like to travel. You get a day-by-day plan with
+                real flight prices and stays costed in.
               </p>
-            </div>
+            </header>
 
-            {/* Enhanced Planning Form */}
-            <Card className="max-w-5xl mx-auto shadow-xl border border-neutral-200 bg-white">
-              <CardHeader className="bg-black text-white rounded-t-lg">
-                <CardTitle className="text-2xl text-center flex items-center justify-center">
-                  <GlobeAltIcon className="w-6 h-6 mr-2" />
-                  Plan Your Perfect Journey
-                </CardTitle>
-              </CardHeader>
-              
-              <CardContent className="p-8">
+            <Card className="mt-10">
+              <CardContent className="p-6 md:p-8">
                 <form onSubmit={handleGenerate} className="space-y-8">
                   {/* Destination & Dates */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div>
-                      <label className="block text-sm font-semibold text-gray-900 mb-3">
-                        <MapPinIcon className="w-4 h-4 inline mr-1" />
-                        Where do you want to go?
+                      <label htmlFor="itinerary-destination" className="mb-2 block text-sm font-medium text-ink">
+                        Destination
                       </label>
                       <CityAutocomplete
-                        placeholder="Search destination..."
+                        id="itinerary-destination"
+                        placeholder="Goa"
                         value={formData.destination}
+                        invalid={Boolean(errors.destination)}
                         onChange={(city, inputValue) => {
                           setDestinationCity(city);
                           setFormData(prev => ({ ...prev, destination: city?.name || inputValue }));
+                          setErrors(prev => ({ ...prev, destination: undefined }));
                         }}
                         className="w-full"
                       />
+                      {errors.destination && (
+                        <p role="alert" className="mt-2 text-xs font-medium text-neg-fg">{errors.destination}</p>
+                      )}
                     </div>
                     
                     <div>
-                      <label className="block text-sm font-semibold text-gray-900 mb-3">
-                        <CalendarDaysIcon className="w-4 h-4 inline mr-1" />
-                        Start Date
-                      </label>
+                      <label className="mb-2 block text-sm font-medium text-ink">Start date</label>
                       <DatePicker
                         date={startDate}
-                        onDateChange={setStartDate}
-                        placeholder="Select start date"
+                        onDateChange={(d) => {
+                          setStartDate(d);
+                          setErrors(prev => ({ ...prev, startDate: undefined }));
+                        }}
+                        placeholder="Select a date"
                         minDate={today}
                         className="w-full"
                       />
+                      {errors.startDate && (
+                        <p role="alert" className="mt-2 text-xs font-medium text-neg-fg">{errors.startDate}</p>
+                      )}
                     </div>
                     
                     <div>
-                      <label className="block text-sm font-semibold text-gray-900 mb-3">
-                        <CalendarDaysIcon className="w-4 h-4 inline mr-1" />
-                        End Date
-                      </label>
+                      <label className="mb-2 block text-sm font-medium text-ink">End date</label>
                       <DatePicker
                         date={endDate}
-                        onDateChange={setEndDate}
-                        placeholder="Select end date"
+                        onDateChange={(d) => {
+                          setEndDate(d);
+                          setErrors(prev => ({ ...prev, endDate: undefined }));
+                        }}
+                        placeholder="Select a date"
                         minDate={startDate ?? today}
                         className="w-full"
                       />
+                      {errors.endDate && (
+                        <p role="alert" className="mt-2 text-xs font-medium text-neg-fg">{errors.endDate}</p>
+                      )}
                     </div>
                   </div>
 
                   {/* Flight Option */}
-                  <Card className="border-2 border-dashed border-neutral-300 bg-neutral-50">
+                  <Card className="border border-dashed border-line-strong bg-surface-sunken">
                     <CardContent className="p-6">
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center space-x-2">
-                          <PaperAirplaneIcon className="w-5 h-5 text-black" />
-                          <Label htmlFor="includeFlight" className="text-lg font-semibold text-black">
-                            Include Flight Booking
+                          <AirplaneTilt className="w-5 h-5 text-ink" />
+                          <Label htmlFor="includeFlight" className="text-lg font-semibold text-ink">
+                            Include a flight
                           </Label>
                         </div>
                         <Switch
@@ -490,22 +497,28 @@ export default function EnhancedItineraryPage() {
                             transition={{ duration: 0.3 }}
                           >
                             <div>
-                              <label className="block text-sm font-semibold text-black mb-3">
-                                <PaperAirplaneIcon className="w-4 h-4 inline mr-1" />
-                                Flying from which city?
+                              <label htmlFor="itinerary-source" className="mb-2 block text-sm font-medium text-ink">
+                                Flying from
                               </label>
                               <CityAutocomplete
-                                placeholder="Search your departure city..."
+                                id="itinerary-source"
+                                placeholder="Delhi"
                                 value={formData.flightSource}
+                                invalid={Boolean(errors.source)}
                                 onChange={(city, inputValue) => {
                                   setSourceCity(city);
                                   setFormData(prev => ({ ...prev, flightSource: city?.name || inputValue }));
+                                  setErrors(prev => ({ ...prev, source: undefined }));
                                 }}
                                 className="w-full"
                               />
-                              <p className="text-xs text-neutral-600 mt-2">
-                                We&apos;ll fetch real-time flight prices to include in your budget
-                              </p>
+                              {errors.source ? (
+                                <p role="alert" className="mt-2 text-xs font-medium text-neg-fg">{errors.source}</p>
+                              ) : (
+                                <p className="mt-2 text-xs text-ink-tertiary">
+                                  Live flight prices get folded into the trip budget.
+                                </p>
+                              )}
                             </div>
                           </motion.div>
                         )}
@@ -516,12 +529,12 @@ export default function EnhancedItineraryPage() {
                   {/* Travelers & Budget */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div>
-                      <label className="block text-sm font-semibold text-black mb-3">
-                        <UsersIcon className="w-4 h-4 inline mr-1" />
-                        Number of Travelers
+                      <label className="block text-sm font-semibold text-ink mb-3">
+                        <Users className="w-4 h-4 inline mr-1" />
+                        Travellers
                       </label>
                       <select 
-                        className="w-full h-12 px-4 border-2 border-gray-300 rounded-lg bg-white text-gray-900 focus:border-black focus:outline-none focus:ring-2 focus:ring-black/10 transition-colors"
+                        className="w-full h-12 px-4 border border-line-strong rounded-lg bg-surface text-ink focus:border-ink focus:outline-none focus:ring-2 focus:ring-ink/10 transition-colors"
                         value={formData.travelers}
                         disabled={travelerRules.isLocked}
                         onChange={(e) => {
@@ -539,9 +552,9 @@ export default function EnhancedItineraryPage() {
                     </div>
                     
                     <div>
-                      <label className="block text-sm font-semibold text-black mb-3">
-                        <CurrencyRupeeIcon className="w-4 h-4 inline mr-1" />
-                        Budget Level
+                      <label className="block text-sm font-semibold text-ink mb-3">
+                        <CurrencyInr className="w-4 h-4 inline mr-1" />
+                        Budget
                       </label>
                       <div className="grid grid-cols-3 gap-2">
                         {(['budget', 'mid-range', 'luxury'] as const).map((budget) => {
@@ -551,10 +564,10 @@ export default function EnhancedItineraryPage() {
                               key={budget}
                               type="button"
                               onClick={() => setFormData(prev => ({ ...prev, budget }))}
-                              className={`p-3 rounded-lg border-2 text-xs font-medium transition-all ${
+                              className={`p-3 rounded-lg border text-xs font-medium transition-all ${
                                 formData.budget === budget
-                                  ? 'border-black bg-black text-white'
-                                  : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                                  ? 'border-ink bg-ink text-surface'
+                                  : 'border-line-strong bg-surface text-ink-secondary hover:border-line-strong'
                               }`}
                             >
                               <div className="text-lg mb-1">{budgetInfo.icon}</div>
@@ -570,11 +583,11 @@ export default function EnhancedItineraryPage() {
                   {/* Travel Preferences */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div>
-                      <label className="block text-sm font-semibold text-gray-900 mb-3">
-                        Group Type
+                      <label className="block text-sm font-semibold text-ink mb-3">
+                        Group type
                       </label>
                       <select 
-                        className="w-full h-12 px-4 border-2 border-gray-300 rounded-lg bg-white focus:border-black transition-colors"
+                        className="w-full h-12 px-4 border border-line-strong rounded-lg bg-surface focus:border-ink transition-colors"
                         value={formData.groupType}
                         onChange={(e) => {
                           const newGroup = e.target.value as ItineraryFormData['groupType'];
@@ -598,11 +611,11 @@ export default function EnhancedItineraryPage() {
                     </div>
                     
                     <div>
-                      <label className="block text-sm font-semibold text-gray-900 mb-3">
-                        Travel Style
+                      <label className="block text-sm font-semibold text-ink mb-3">
+                        Travel style
                       </label>
                       <select 
-                        className="w-full h-12 px-4 border-2 border-gray-300 rounded-lg bg-white focus:border-black transition-colors"
+                        className="w-full h-12 px-4 border border-line-strong rounded-lg bg-surface focus:border-ink transition-colors"
                         value={formData.travelStyle}
                         onChange={(e) =>
                           setFormData(prev => ({
@@ -620,11 +633,11 @@ export default function EnhancedItineraryPage() {
                     </div>
                     
                     <div>
-                      <label className="block text-sm font-semibold text-gray-900 mb-3">
-                        Fitness Level
+                      <label className="block text-sm font-semibold text-ink mb-3">
+                        Walking pace
                       </label>
                       <select 
-                        className="w-full h-12 px-4 border-2 border-gray-300 rounded-lg bg-white focus:border-black transition-colors"
+                        className="w-full h-12 px-4 border border-line-strong rounded-lg bg-surface focus:border-ink transition-colors"
                         value={formData.fitnessLevel}
                         onChange={(e) =>
                           setFormData(prev => ({
@@ -642,9 +655,9 @@ export default function EnhancedItineraryPage() {
 
                   {/* Interests */}
                   <div>
-                    <label className="block text-sm font-semibold text-black mb-4">
-                      <FireIcon className="w-4 h-4 inline mr-1" />
-                      What interests you most? (Select all that apply)
+                    <label className="block text-sm font-semibold text-ink mb-4">
+                      <Fire className="w-4 h-4 inline mr-1" />
+                      Interests
                     </label>
                     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
                       {interests.map((interest) => (
@@ -652,10 +665,10 @@ export default function EnhancedItineraryPage() {
                           key={interest}
                           type="button"
                           onClick={() => handleInterestToggle(interest)}
-                          className={`p-3 rounded-lg border-2 text-xs font-medium transition-all ${
+                          className={`p-3 rounded-lg border text-xs font-medium transition-all ${
                             formData.interests.includes(interest)
-                              ? 'border-black bg-black text-white'
-                              : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                              ? 'border-ink bg-ink text-surface'
+                              : 'border-line-strong bg-surface text-ink-secondary hover:border-line-strong'
                           }`}
                         >
                           {interest}
@@ -666,8 +679,8 @@ export default function EnhancedItineraryPage() {
 
                   {/* Dietary Restrictions */}
                   <div>
-                    <label className="block text-sm font-semibold text-black mb-4">
-                      Dietary Preferences (Optional)
+                    <label className="block text-sm font-semibold text-ink mb-4">
+                      Dietary preferences
                     </label>
                     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
                       {dietaryOptions.map((dietary) => (
@@ -675,10 +688,10 @@ export default function EnhancedItineraryPage() {
                           key={dietary}
                           type="button"
                           onClick={() => handleDietaryToggle(dietary)}
-                          className={`p-3 rounded-lg border-2 text-xs font-medium transition-all ${
+                          className={`p-3 rounded-lg border text-xs font-medium transition-all ${
                             formData.dietaryRestrictions.includes(dietary)
-                              ? 'border-neutral-800 bg-neutral-800 text-white'
-                              : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                              ? 'border-ink bg-ink text-surface'
+                              : 'border-line-strong bg-surface text-ink-secondary hover:border-line-strong'
                           }`}
                         >
                           {dietary}
@@ -688,39 +701,29 @@ export default function EnhancedItineraryPage() {
                   </div>
 
                   {/* Generate Button */}
-                  <div className="text-center pt-8">
-                    <Button
-                      type="submit"
-                      size="lg"
-                      className="px-12 py-4 text-lg bg-black hover:bg-neutral-800 text-white rounded-xl shadow-lg transform hover:scale-105 transition-all duration-200"
-                      disabled={!destinationCity}
-                    >
-                      <SparklesIcon className="w-5 h-5 mr-2" />
-                      Generate My Perfect Itinerary
+                  <div className="pt-4">
+                    <Button type="submit" size="lg" disabled={!destinationCity}>
+                      Build the itinerary
                     </Button>
-                    <p className="text-xs text-neutral-500 mt-3">
-                      Powered by AI with real-time pricing from Google Flights & Hotels
+                    <p className="mt-3 text-xs text-ink-tertiary">
+                      Flight and hotel prices come from live search at the time you generate.
                     </p>
                   </div>
                 </form>
               </CardContent>
             </Card>
-          </motion.div>
+          </div>
         ) : (
-          // Generated Itinerary Display
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6 }}
-          >
+          <div>
             {/* Header */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between mb-8">
-              <div className="text-center md:text-left">
-                <h1 className="text-4xl font-bold text-black mb-2">
-                  Your Perfect Itinerary
-                </h1>
-                <p className="text-neutral-600 text-lg text-center md:text-left">
-                  {destinationCity?.name} • {startDate && endDate ? `${format(startDate, 'MMM dd')} to ${format(endDate, 'MMM dd')}` : 'Select dates'} • {formData.travelers} travelers
+            <div className="mb-10 flex flex-col justify-between gap-6 md:flex-row md:items-end">
+              <div>
+                <h1 className="text-display-sm text-ink">{destinationCity?.name}</h1>
+                <p className="mt-2 text-ink-secondary [font-variant-numeric:tabular-nums]">
+                  {startDate && endDate
+                    ? `${format(startDate, 'd MMM')} to ${format(endDate, 'd MMM')}`
+                    : 'Dates not set'}{' '}
+                  · {formData.travelers} {formData.travelers === 1 ? 'traveller' : 'travellers'}
                 </p>
               </div>
               <div className="flex space-x-3 mt-4 md:mt-0">
@@ -731,12 +734,12 @@ export default function EnhancedItineraryPage() {
                     setGeneratedItinerary(null);
                     setItineraryMeta(null);
                   }}
-                  className="border-2 hover:border-black hover:text-black"
+                  className="border hover:border-ink hover:text-ink"
                 >
                   Edit Trip
                 </Button>
                 <Button
-                  className="bg-black hover:bg-neutral-800 text-white"
+                  className="bg-ink hover:bg-ink text-surface"
                   disabled={isSaved || !generatedItinerary}
                   onClick={() => {
                     if (!generatedItinerary) return;
@@ -753,19 +756,19 @@ export default function EnhancedItineraryPage() {
                     setIsSaved(true);
                   }}
                 >
-                  {isSaved ? '✓ Saved to My Trips' : 'Save Itinerary'}
+                  {isSaved ? 'Saved' : 'Save trip'}
                 </Button>
               </div>
             </div>
 
             {(generatedItinerary?.isFallback || itineraryMeta?.isFallback) && (
-              <div className="mb-8 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
-                <ExclamationTriangleIcon className="w-6 h-6 text-amber-600 mt-0.5" />
+              <div className="mb-8 flex items-start gap-3 rounded-lg border border-caution-fg/25 bg-caution p-4">
+                <Warning className="w-6 h-6 text-caution-fg mt-0.5" />
                 <div>
-                  <p className="text-sm font-semibold text-amber-800">
+                  <p className="text-sm font-semibold text-caution-fg">
                     Showing curated backup itinerary
                   </p>
-                  <p className="text-sm text-amber-700 mt-1">
+                  <p className="text-sm text-caution-fg mt-1">
                     {generatedItinerary?.fallbackReason || itineraryMeta?.fallbackReason || 'Perplexity took too long to respond, so we generated a smart template to keep you moving.'}
                   </p>
                 </div>
@@ -776,31 +779,31 @@ export default function EnhancedItineraryPage() {
               <>
                 {/* Trip Summary Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                  <Card className="bg-white border-2 border-neutral-200">
+                  <Card className="bg-surface border border-line">
                     <CardContent className="p-6 text-center">
-                      <CalendarDaysIcon className="w-8 h-8 text-black mx-auto mb-3" />
-                      <p className="text-sm text-neutral-600 font-medium">Duration</p>
-                      <p className="text-2xl font-bold text-black">
+                      <CalendarBlank className="w-8 h-8 text-ink mx-auto mb-3" />
+                      <p className="text-sm text-ink-secondary font-medium">Duration</p>
+                      <p className="text-2xl font-bold text-ink">
                         {itineraryDuration || 0} Days
                       </p>
                     </CardContent>
                   </Card>
                   
-                  <Card className="bg-white border-2 border-neutral-200">
+                  <Card className="bg-surface border border-line">
                     <CardContent className="p-6 text-center">
-                      <MapPinIcon className="w-8 h-8 text-black mx-auto mb-3" />
-                      <p className="text-sm text-neutral-600 font-medium">Activities</p>
-                      <p className="text-2xl font-bold text-black">
+                      <MapPin className="w-8 h-8 text-ink mx-auto mb-3" />
+                      <p className="text-sm text-ink-secondary font-medium">Activities</p>
+                      <p className="text-2xl font-bold text-ink">
                         {generatedItinerary.days?.reduce<number>((acc, day) => acc + day.activities.length, 0) ?? 0}
                       </p>
                     </CardContent>
                   </Card>
                   
-                  <Card className="bg-white border-2 border-neutral-200">
+                  <Card className="bg-surface border border-line">
                     <CardContent className="p-6 text-center">
-                      <CurrencyRupeeIcon className="w-8 h-8 text-black mx-auto mb-3" />
-                      <p className="text-sm text-neutral-600 font-medium">Total Budget</p>
-                      <p className="text-2xl font-bold text-black">
+                      <CurrencyInr className="w-8 h-8 text-ink mx-auto mb-3" />
+                      <p className="text-sm text-ink-secondary font-medium">Total Budget</p>
+                      <p className="text-2xl font-bold text-ink">
                         {generatedItinerary.budgetBreakdown?.total ? 
                           formatCurrency(generatedItinerary.budgetBreakdown.total) : 
                           'N/A'
@@ -809,21 +812,21 @@ export default function EnhancedItineraryPage() {
                     </CardContent>
                   </Card>
                   
-                  <Card className="bg-white border-2 border-neutral-200">
+                  <Card className="bg-surface border border-line">
                     <CardContent className="p-6 text-center">
-                      <StarIcon className="w-8 h-8 text-black mx-auto mb-3" />
-                      <p className="text-sm text-neutral-600 font-medium">AI Score</p>
-                      <p className="text-2xl font-bold text-black">95%</p>
+                      <Star className="w-8 h-8 text-ink mx-auto mb-3" />
+                      <p className="text-sm text-ink-secondary font-medium">AI Score</p>
+                      <p className="text-2xl font-bold text-ink">95%</p>
                     </CardContent>
                   </Card>
                 </div>
 
                 {/* Pricing Breakdown */}
                 {generatedItinerary.budgetBreakdown && (
-                  <Card className="mb-8 border-2 border-neutral-200 bg-neutral-50">
+                  <Card className="mb-8 border border-line bg-surface-sunken">
                     <CardHeader>
                       <CardTitle className="flex items-center text-xl">
-                        <CurrencyRupeeIcon className="w-6 h-6 mr-2 text-black" />
+                        <CurrencyInr className="w-6 h-6 mr-2 text-ink" />
                         Real-Time Pricing Breakdown
                       </CardTitle>
                     </CardHeader>
@@ -831,14 +834,14 @@ export default function EnhancedItineraryPage() {
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         {formData.includeFlight && generatedItinerary.budgetBreakdown.flights && (
                           <div className="text-center">
-                            <div className="bg-white p-4 rounded-lg border border-neutral-200">
-                              <PaperAirplaneIcon className="w-8 h-8 text-black mx-auto mb-2" />
-                              <p className="text-sm font-medium text-black">Flight Cost</p>
-                              <p className="text-2xl font-bold text-black">
+                            <div className="bg-surface p-4 rounded-lg border border-line">
+                              <AirplaneTilt className="w-8 h-8 text-ink mx-auto mb-2" />
+                              <p className="text-sm font-medium text-ink">Flight Cost</p>
+                              <p className="text-2xl font-bold text-ink">
                                 {formatCurrency(generatedItinerary.budgetBreakdown.flights)}
                               </p>
-                              <p className="text-xs text-neutral-600 mt-1">
-                                {sourceCity?.name} → {destinationCity?.name}
+                              <p className="text-xs text-ink-secondary mt-1">
+                                {sourceCity?.name} to {destinationCity?.name}
                               </p>
                             </div>
                           </div>
@@ -846,48 +849,48 @@ export default function EnhancedItineraryPage() {
                         
                         {generatedItinerary.budgetBreakdown.accommodation && (
                           <div className="text-center">
-                            <div className="bg-white p-4 rounded-lg border border-neutral-200">
-                              <BuildingOfficeIcon className="w-8 h-8 text-black mx-auto mb-2" />
-                              <p className="text-sm font-medium text-black">Hotel Cost</p>
-                              <p className="text-2xl font-bold text-black">
+                            <div className="bg-surface p-4 rounded-lg border border-line">
+                              <Buildings className="w-8 h-8 text-ink mx-auto mb-2" />
+                              <p className="text-sm font-medium text-ink">Hotel Cost</p>
+                              <p className="text-2xl font-bold text-ink">
                                 {formatCurrency(generatedItinerary.budgetBreakdown.accommodation)}
                               </p>
-                              <p className="text-xs text-neutral-600 mt-1">Total stay</p>
+                              <p className="text-xs text-ink-secondary mt-1">Total stay</p>
                             </div>
                           </div>
                         )}
                         
                         <div className="text-center">
-                          <div className="bg-white p-4 rounded-lg border border-neutral-200">
-                            <HeartIcon className="w-8 h-8 text-black mx-auto mb-2" />
-                            <p className="text-sm font-medium text-black">Activities & Food</p>
-                            <p className="text-2xl font-bold text-black">
+                          <div className="bg-surface p-4 rounded-lg border border-line">
+                            <Heart className="w-8 h-8 text-ink mx-auto mb-2" />
+                            <p className="text-sm font-medium text-ink">Activities & Food</p>
+                            <p className="text-2xl font-bold text-ink">
                               {formatCurrency(
                                 (generatedItinerary.budgetBreakdown.activities || 0) + 
                                 (generatedItinerary.budgetBreakdown.food || 0)
                               )}
                             </p>
-                            <p className="text-xs text-neutral-600 mt-1">Estimated total</p>
+                            <p className="text-xs text-ink-secondary mt-1">Estimated total</p>
                           </div>
                         </div>
                       </div>
                       
-                      <div className="mt-6 p-4 bg-black text-white rounded-lg text-center space-y-1">
+                      <div className="mt-6 p-4 bg-ink text-surface rounded-lg text-center space-y-1">
                         <p className="text-sm font-medium">
                           {itineraryMeta?.realPricing?.hotelPrices || 'Hotel pricing generated with Perplexity heuristics'}
                         </p>
                         {itineraryMeta?.realPricing?.flightPrices && (
-                          <p className="text-xs text-neutral-200">
+                          <p className="text-xs text-surface/70">
                             Flights: {itineraryMeta.realPricing.flightPrices}
                           </p>
                         )}
                         {generatedAtLabel && (
-                          <p className="text-xs text-neutral-200">
+                          <p className="text-xs text-surface/70">
                             Generated {generatedAtLabel}
                           </p>
                         )}
                         {sourceLabel && (
-                          <p className="text-xs uppercase tracking-wide text-neutral-300">
+                          <p className="text-xs uppercase tracking-wide text-ink-tertiary">
                             Source: {sourceLabel}
                           </p>
                         )}
@@ -898,54 +901,54 @@ export default function EnhancedItineraryPage() {
 
                 {/* ML Flight Price Intelligence */}
                 {itineraryMeta?.flightInsight?.source === 'ml-model' && (
-                  <Card className="mb-8 border-2 border-black bg-white">
-                    <CardHeader className="bg-black text-white rounded-t-md">
+                  <Card className="mb-8 border border-ink bg-surface">
+                    <CardHeader className="bg-ink text-surface rounded-t-md">
                       <CardTitle className="flex items-center text-xl">
-                        <SparklesIcon className="w-6 h-6 mr-2" />
+                        <Sparkle className="w-6 h-6 mr-2" />
                         Flight Price Intelligence
-                        <span className="ml-3 text-xs font-normal bg-white/20 px-2 py-0.5 rounded-full">
+                        <span className="ml-3 text-xs font-normal bg-surface/20 px-2 py-0.5 rounded-full">
                           ML model · {itineraryMeta.flightInsight.confidence}% confidence
                         </span>
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="p-6 space-y-5">
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="p-4 rounded-xl border border-neutral-200 bg-neutral-50 text-center">
-                          <p className="text-xs text-neutral-500 uppercase tracking-wide">Predicted Outbound</p>
-                          <p className="text-2xl font-bold text-black mt-1">
+                        <div className="p-4 rounded-lg border border-line bg-surface-sunken text-center">
+                          <p className="text-xs text-ink-tertiary uppercase tracking-wide">Predicted Outbound</p>
+                          <p className="text-2xl font-bold text-ink mt-1">
                             {formatCurrency(itineraryMeta.flightInsight.outbound || 0)}
                           </p>
-                          <p className="text-xs text-neutral-600 mt-1">{sourceCity?.name} → {destinationCity?.name}</p>
+                          <p className="text-xs text-ink-secondary mt-1">{sourceCity?.name} to {destinationCity?.name}</p>
                         </div>
-                        <div className="p-4 rounded-xl border border-neutral-200 bg-neutral-50 text-center">
-                          <p className="text-xs text-neutral-500 uppercase tracking-wide">Predicted Return</p>
-                          <p className="text-2xl font-bold text-black mt-1">
+                        <div className="p-4 rounded-lg border border-line bg-surface-sunken text-center">
+                          <p className="text-xs text-ink-tertiary uppercase tracking-wide">Predicted Return</p>
+                          <p className="text-2xl font-bold text-ink mt-1">
                             {formatCurrency(itineraryMeta.flightInsight.return || 0)}
                           </p>
-                          <p className="text-xs text-neutral-600 mt-1">{destinationCity?.name} → {sourceCity?.name}</p>
+                          <p className="text-xs text-ink-secondary mt-1">{destinationCity?.name} to {sourceCity?.name}</p>
                         </div>
-                        <div className="p-4 rounded-xl border border-neutral-200 bg-neutral-50 text-center">
-                          <p className="text-xs text-neutral-500 uppercase tracking-wide">Class</p>
-                          <p className="text-2xl font-bold text-black mt-1 capitalize">
+                        <div className="p-4 rounded-lg border border-line bg-surface-sunken text-center">
+                          <p className="text-xs text-ink-tertiary uppercase tracking-wide">Class</p>
+                          <p className="text-2xl font-bold text-ink mt-1 capitalize">
                             {itineraryMeta.flightInsight.travelClass}
                           </p>
-                          <p className="text-xs text-neutral-600 mt-1">Based on your budget tier</p>
+                          <p className="text-xs text-ink-secondary mt-1">Based on your budget tier</p>
                         </div>
                       </div>
 
                       {itineraryMeta.flightInsight.bookingAdvice?.recommendation && (
-                        <div className="p-4 rounded-xl bg-green-50 border border-green-200">
-                          <p className="text-sm font-semibold text-green-800 capitalize">
+                        <div className="p-4 rounded-lg bg-pos border border-pos-fg/25">
+                          <p className="text-sm font-semibold text-pos-fg capitalize">
                             {itineraryMeta.flightInsight.bookingAdvice.action?.replace(/_/g, ' ') || 'When to book'}
                           </p>
-                          <p className="text-sm text-green-700 mt-1">
+                          <p className="text-sm text-pos-fg mt-1">
                             {itineraryMeta.flightInsight.bookingAdvice.recommendation}
                           </p>
                           {!!itineraryMeta.flightInsight.bookingAdvice.bestDays?.length && (
                             <div className="flex flex-wrap gap-2 mt-3">
                               {itineraryMeta.flightInsight.bookingAdvice.bestDays.map((d, i) => (
-                                <span key={i} className="px-2 py-1 bg-white border border-green-200 rounded-full text-xs text-green-700">
-                                  {d.day_of_week} ({d.days_until}d) — {formatCurrency(d.price)}
+                                <span key={i} className="px-2 py-1 bg-surface border border-pos-fg/25 rounded-full text-xs text-pos-fg">
+                                  {d.day_of_week} ({d.days_until}d), {formatCurrency(d.price)}
                                 </span>
                               ))}
                             </div>
@@ -954,11 +957,11 @@ export default function EnhancedItineraryPage() {
                       )}
 
                       <div className="flex items-center justify-between">
-                        <p className="text-xs text-neutral-500">
+                        <p className="text-xs text-ink-tertiary">
                           Predicted by the gradient-boosting model trained on 600K+ flight records.
                         </p>
                         <Button asChild variant="outline" size="sm">
-                          <Link href="/search">Search &amp; book these flights →</Link>
+                          <Link href="/search">Search and book these flights</Link>
                         </Button>
                       </div>
                     </CardContent>
@@ -966,24 +969,24 @@ export default function EnhancedItineraryPage() {
                 )}
 
                 {generatedItinerary.transportation && (
-                  <Card className="mb-8 border-2 border-neutral-200 bg-white">
-                    <CardHeader className="bg-neutral-50 border-b">
+                  <Card className="mb-8 border border-line bg-surface">
+                    <CardHeader className="bg-surface-sunken border-b">
                       <CardTitle className="flex items-center text-xl">
-                        <PaperAirplaneIcon className="w-6 h-6 mr-2 text-black" />
+                        <AirplaneTilt className="w-6 h-6 mr-2 text-ink" />
                         Transportation Insights
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         {generatedItinerary.transportation.flights && (
-                          <div className="p-5 border border-neutral-200 rounded-xl bg-neutral-50">
-                            <h3 className="text-lg font-semibold text-black mb-4 flex items-center gap-2">
-                              <PaperAirplaneIcon className="w-5 h-5" /> Flight Guidance
-                            </h3>
-                            <div className="space-y-3 text-sm text-neutral-700">
+                          <div className="p-5 border border-line rounded-lg bg-surface-sunken">
+                            <h2 className="text-lg font-semibold text-ink mb-4 flex items-center gap-2">
+                              <AirplaneTilt className="w-5 h-5" /> Flight Guidance
+                            </h2>
+                            <div className="space-y-3 text-sm text-ink-secondary">
                               <div>
-                                <p className="font-semibold text-neutral-800">Outbound</p>
-                                <p className="text-neutral-600">
+                                <p className="font-semibold text-ink">Outbound</p>
+                                <p className="text-ink-secondary">
                                   {formatCurrency(generatedItinerary.transportation.flights.outbound.estimatedCost || 0)}
                                 </p>
                                 <ul className="list-disc list-inside mt-1 space-y-1">
@@ -993,8 +996,8 @@ export default function EnhancedItineraryPage() {
                                 </ul>
                               </div>
                               <div>
-                                <p className="font-semibold text-neutral-800">Return</p>
-                                <p className="text-neutral-600">
+                                <p className="font-semibold text-ink">Return</p>
+                                <p className="text-ink-secondary">
                                   {formatCurrency(generatedItinerary.transportation.flights.return.estimatedCost || 0)}
                                 </p>
                                 <ul className="list-disc list-inside mt-1 space-y-1">
@@ -1007,14 +1010,14 @@ export default function EnhancedItineraryPage() {
                           </div>
                         )}
 
-                        <div className="p-5 border border-neutral-200 rounded-xl bg-neutral-50">
-                          <h3 className="text-lg font-semibold text-black mb-4 flex items-center gap-2">
-                            <ArrowRightIcon className="w-5 h-5" /> Local Transport
-                          </h3>
-                          <p className="text-sm text-neutral-700 mb-4">
+                        <div className="p-5 border border-line rounded-lg bg-surface-sunken">
+                          <h2 className="text-lg font-semibold text-ink mb-4 flex items-center gap-2">
+                            <ArrowRight className="w-5 h-5" /> Local Transport
+                          </h2>
+                          <p className="text-sm text-ink-secondary mb-4">
                             Estimated Daily Cost: {formatCurrency(generatedItinerary.transportation.local?.estimatedDailyCost || 0)}
                           </p>
-                          <ul className="list-disc list-inside space-y-2 text-sm text-neutral-700">
+                          <ul className="list-disc list-inside space-y-2 text-sm text-ink-secondary">
                             {generatedItinerary.transportation.local?.recommendations?.map((rec, recIndex) => (
                               <li key={recIndex}>{rec}</li>
                             ))}
@@ -1027,10 +1030,10 @@ export default function EnhancedItineraryPage() {
 
                 {/* Hotel Recommendations */}
                 {generatedItinerary.accommodation?.recommendations?.length > 0 && (
-                  <Card className="mb-8 border-2 border-neutral-200 bg-white">
-                    <CardHeader className="bg-neutral-50 border-b">
+                  <Card className="mb-8 border border-line bg-surface">
+                    <CardHeader className="bg-surface-sunken border-b">
                       <CardTitle className="flex items-center text-xl">
-                        <BuildingOfficeIcon className="w-6 h-6 mr-2 text-black" />
+                        <Buildings className="w-6 h-6 mr-2 text-ink" />
                         Handpicked Stays for You
                       </CardTitle>
                     </CardHeader>
@@ -1039,36 +1042,36 @@ export default function EnhancedItineraryPage() {
                         {generatedItinerary.accommodation.recommendations.map((hotel, index) => (
                           <div
                             key={index}
-                            className="border border-neutral-200 rounded-xl p-5 bg-white shadow-sm hover:shadow-md transition-shadow"
+                            className="border border-line rounded-lg p-5 bg-surface shadow-sm hover:shadow-md transition-shadow"
                           >
                             <div className="flex items-start justify-between gap-3 mb-3">
                               <div>
-                                <h3 className="text-lg font-semibold text-black">{hotel.name}</h3>
-                                <p className="text-sm text-neutral-600 font-medium">{hotel.area}</p>
+                                <h2 className="text-lg font-semibold text-ink">{hotel.name}</h2>
+                                <p className="text-sm text-ink-secondary font-medium">{hotel.area}</p>
                               </div>
                               {hotel.rating && (
-                                <div className="flex items-center gap-1 bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full text-sm font-semibold">
-                                  <StarIcon className="w-4 h-4" />
+                                <div className="flex items-center gap-1 bg-caution text-caution-fg px-2 py-1 rounded-full text-sm font-semibold">
+                                  <Star className="w-4 h-4" />
                                   <span>{formatRating(hotel.rating)}</span>
                                 </div>
                               )}
                             </div>
 
-                            <div className="flex flex-wrap items-center gap-4 text-sm font-semibold text-neutral-700">
+                            <div className="flex flex-wrap items-center gap-4 text-sm font-semibold text-ink-secondary">
                               <span>
                                 {formatCurrency(hotel.estimatedCostPerNight || hotel.pricePerNight || 0)}
-                                <span className="text-xs text-neutral-500 ml-1">per night</span>
+                                <span className="text-xs text-ink-tertiary ml-1">per night</span>
                               </span>
                               {hotel.totalPrice && (
                                 <span>
                                   {formatCurrency(hotel.totalPrice)}
-                                  <span className="text-xs text-neutral-500 ml-1">total</span>
+                                  <span className="text-xs text-ink-tertiary ml-1">total</span>
                                 </span>
                               )}
                             </div>
 
                             {hotel.reason && (
-                              <p className="mt-3 text-sm text-neutral-600 leading-relaxed">{hotel.reason}</p>
+                              <p className="mt-3 text-sm text-ink-secondary leading-relaxed">{hotel.reason}</p>
                             )}
 
                             {hotel.amenities && hotel.amenities.length > 0 && (
@@ -1077,7 +1080,7 @@ export default function EnhancedItineraryPage() {
                                   <Badge
                                     key={amenityIndex}
                                     variant="outline"
-                                    className="border-neutral-300 text-neutral-700 bg-neutral-100 capitalize"
+                                    className="border-line-strong text-ink-secondary bg-surface-sunken capitalize"
                                   >
                                     {amenity}
                                   </Badge>
@@ -1100,15 +1103,15 @@ export default function EnhancedItineraryPage() {
                       animate={{ opacity: 1, x: 0 }}
                       transition={{ duration: 0.5, delay: dayIndex * 0.1 }}
                     >
-                      <Card className="shadow-lg border border-neutral-200 bg-white overflow-hidden">
-                        <CardHeader className="bg-neutral-50 border-b">
+                      <Card className="shadow-sm border border-line bg-surface overflow-hidden">
+                        <CardHeader className="bg-surface-sunken border-b">
                           <CardTitle className="flex items-center text-xl">
-                            <div className="w-10 h-10 bg-black text-white rounded-full flex items-center justify-center text-sm font-bold mr-4">
+                            <div className="w-10 h-10 bg-ink text-surface rounded-full flex items-center justify-center text-sm font-bold mr-4">
                               {day.day}
                             </div>
                             <div>
-                              <span className="text-black">Day {day.day}</span>
-                              <p className="text-sm font-normal text-neutral-600">{day.date}</p>
+                              <span className="text-ink">Day {day.day}</span>
+                              <p className="text-sm font-normal text-ink-secondary">{day.date}</p>
                             </div>
                           </CardTitle>
                         </CardHeader>
@@ -1121,10 +1124,10 @@ export default function EnhancedItineraryPage() {
                                 initial={{ opacity: 0, y: 10 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 transition={{ duration: 0.3, delay: activityIndex * 0.1 }}
-                                className="flex items-start space-x-4 p-4 rounded-xl border border-gray-200 hover:border-black hover:shadow-md transition-all duration-300 bg-white"
+                                className="flex items-start space-x-4 p-4 rounded-lg border border-line hover:border-ink hover:shadow-md transition-all duration-300 bg-surface"
                               >
                                 <div className="flex flex-col items-center">
-                                  <div className="text-sm font-bold text-black bg-neutral-100 px-3 py-1 rounded-full mb-2">
+                                  <div className="text-sm font-bold text-ink bg-surface-sunken px-3 py-1 rounded-full mb-2">
                                     {activity.time}
                                   </div>
                                   <div className={`p-3 rounded-full ${getActivityColor(activity.category)} shadow-sm`}>
@@ -1135,29 +1138,29 @@ export default function EnhancedItineraryPage() {
                                 <div className="flex-1">
                                   <div className="flex items-start justify-between">
                                     <div>
-                                      <h4 className="text-lg font-semibold text-black mb-1">
+                                      <h3 className="text-lg font-semibold text-ink mb-1">
                                         {activity.title}
-                                      </h4>
-                                      <p className="text-neutral-600 mb-3 leading-relaxed">
+                                      </h3>
+                                      <p className="text-ink-secondary mb-3 leading-relaxed">
                                         {activity.description}
                                       </p>
                                       
                                       <div className="flex flex-wrap items-center gap-4 text-sm">
                                         {activity.location && (
-                                          <span className="flex items-center text-neutral-500">
-                                            <MapPinIcon className="w-4 h-4 mr-1" />
+                                          <span className="flex items-center text-ink-tertiary">
+                                            <MapPin className="w-4 h-4 mr-1" />
                                             {activity.location}
                                           </span>
                                         )}
                                         {activity.duration && (
-                                          <span className="flex items-center text-neutral-500">
-                                            <ClockIcon className="w-4 h-4 mr-1" />
+                                          <span className="flex items-center text-ink-tertiary">
+                                            <Clock className="w-4 h-4 mr-1" />
                                             {activity.duration}
                                           </span>
                                         )}
                                         {activity.estimatedCost && (
-                                          <span className="flex items-center text-black font-semibold">
-                                            <CurrencyRupeeIcon className="w-4 h-4 mr-1" />
+                                          <span className="flex items-center text-ink font-semibold">
+                                            <CurrencyInr className="w-4 h-4 mr-1" />
                                             {formatCurrency(activity.estimatedCost)}
                                           </span>
                                         )}
@@ -1178,33 +1181,33 @@ export default function EnhancedItineraryPage() {
 
                           {day.meals?.length ? (
                             <div className="mt-8">
-                              <h4 className="text-lg font-semibold text-black mb-4 flex items-center gap-2">
-                                <HeartIcon className="w-5 h-5" /> Meal Highlights
-                              </h4>
+                              <h3 className="text-lg font-semibold text-ink mb-4 flex items-center gap-2">
+                                <Heart className="w-5 h-5" /> Meal Highlights
+                              </h3>
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 {day.meals.map((meal, mealIndex) => (
                                   <div
                                     key={mealIndex}
-                                    className="p-4 border border-neutral-200 rounded-xl bg-neutral-50"
+                                    className="p-4 border border-line rounded-lg bg-surface-sunken"
                                   >
                                     <div className="flex items-center justify-between">
                                       <div>
-                                        <p className="text-sm font-semibold text-neutral-800 uppercase tracking-wide">
+                                        <p className="text-sm font-semibold text-ink uppercase tracking-wide">
                                           {meal.time}
                                         </p>
-                                        <h5 className="text-lg font-semibold text-black">
+                                        <h4 className="text-lg font-semibold text-ink">
                                           {meal.restaurant}
-                                        </h5>
+                                        </h4>
                                       </div>
-                                      <Badge variant="secondary" className="bg-black text-white">
+                                      <Badge variant="secondary" className="bg-ink text-surface">
                                         {formatCurrency(meal.estimatedCost || 0)}
                                       </Badge>
                                     </div>
-                                    <p className="text-sm text-neutral-600 mt-2">
+                                    <p className="text-sm text-ink-secondary mt-2">
                                       Cuisine: {meal.cuisine}
                                     </p>
                                     {meal.speciality && (
-                                      <p className="text-sm text-neutral-500 mt-1">
+                                      <p className="text-sm text-ink-tertiary mt-1">
                                         Signature: {meal.speciality}
                                       </p>
                                     )}
@@ -1215,8 +1218,8 @@ export default function EnhancedItineraryPage() {
                           ) : null}
 
                           {typeof day.estimatedDailyCost === 'number' && day.estimatedDailyCost > 0 && (
-                            <div className="mt-8 flex items-center justify-end text-sm text-neutral-600">
-                              <span className="font-medium text-black mr-2">Estimated spend for this day:</span>
+                            <div className="mt-8 flex items-center justify-end text-sm text-ink-secondary">
+                              <span className="font-medium text-ink mr-2">Estimated spend for this day:</span>
                               {formatCurrency(day.estimatedDailyCost)}
                             </div>
                           )}
@@ -1228,29 +1231,29 @@ export default function EnhancedItineraryPage() {
 
                 {/* Tips & Recommendations */}
                 {generatedItinerary.tips && (generatedItinerary.tips.general?.length > 0 || generatedItinerary.tips.budgetSaving?.length > 0) && (
-                  <Card className="mt-8 border-2 border-neutral-200 bg-neutral-50">
+                  <Card className="mt-8 border border-line bg-surface-sunken">
                     <CardHeader>
                       <CardTitle className="flex items-center text-xl">
-                        <SparklesIcon className="w-6 h-6 mr-2 text-black" />
+                        <Sparkle className="w-6 h-6 mr-2 text-ink" />
                         AI Travel Tips & Recommendations
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {generatedItinerary.tips.general?.map((tip: string, index: number) => (
-                          <div key={index} className="flex items-start space-x-3 p-4 bg-white rounded-lg border border-neutral-200">
-                            <div className="w-6 h-6 bg-black rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                              <CheckIcon className="w-4 h-4 text-white" />
+                          <div key={index} className="flex items-start space-x-3 p-4 bg-surface rounded-lg border border-line">
+                            <div className="w-6 h-6 bg-ink rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                              <Check className="w-4 h-4 text-surface" />
                             </div>
-                            <p className="text-neutral-700 text-sm leading-relaxed">{tip}</p>
+                            <p className="text-ink-secondary text-sm leading-relaxed">{tip}</p>
                           </div>
                         ))}
                         {generatedItinerary.tips.budgetSaving?.map((tip: string, index: number) => (
-                          <div key={`budget-${index}`} className="flex items-start space-x-3 p-4 bg-white rounded-lg border border-neutral-200">
-                            <div className="w-6 h-6 bg-neutral-800 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                              <CurrencyRupeeIcon className="w-4 h-4 text-white" />
+                          <div key={`budget-${index}`} className="flex items-start space-x-3 p-4 bg-surface rounded-lg border border-line">
+                            <div className="w-6 h-6 bg-ink rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                              <CurrencyInr className="w-4 h-4 text-surface" />
                             </div>
-                            <p className="text-neutral-700 text-sm leading-relaxed">{tip}</p>
+                            <p className="text-ink-secondary text-sm leading-relaxed">{tip}</p>
                           </div>
                         ))}
                       </div>
@@ -1259,30 +1262,30 @@ export default function EnhancedItineraryPage() {
                 )}
 
                 {generatedItinerary.bestTimeToVisit && (
-                  <Card className="mt-8 border-2 border-neutral-200 bg-neutral-50">
+                  <Card className="mt-8 border border-line bg-surface-sunken">
                     <CardHeader>
                       <CardTitle className="flex items-center text-xl">
-                        <CalendarDaysIcon className="w-6 h-6 mr-2 text-black" />
+                        <CalendarBlank className="w-6 h-6 mr-2 text-ink" />
                         Best Time to Visit Insights
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="p-4 bg-white rounded-lg border border-neutral-200">
-                          <h4 className="text-sm font-semibold text-neutral-600 uppercase tracking-wide">Weather</h4>
-                          <p className="mt-2 text-neutral-700 leading-relaxed">
+                        <div className="p-4 bg-surface rounded-lg border border-line">
+                          <h3 className="text-sm font-semibold text-ink-secondary uppercase tracking-wide">Weather</h3>
+                          <p className="mt-2 text-ink-secondary leading-relaxed">
                             {generatedItinerary.bestTimeToVisit.weather}
                           </p>
                         </div>
-                        <div className="p-4 bg-white rounded-lg border border-neutral-200">
-                          <h4 className="text-sm font-semibold text-neutral-600 uppercase tracking-wide">Crowds</h4>
-                          <p className="mt-2 text-neutral-700 leading-relaxed">
+                        <div className="p-4 bg-surface rounded-lg border border-line">
+                          <h3 className="text-sm font-semibold text-ink-secondary uppercase tracking-wide">Crowds</h3>
+                          <p className="mt-2 text-ink-secondary leading-relaxed">
                             {generatedItinerary.bestTimeToVisit.crowds}
                           </p>
                         </div>
-                        <div className="p-4 bg-white rounded-lg border border-neutral-200">
-                          <h4 className="text-sm font-semibold text-neutral-600 uppercase tracking-wide">Prices</h4>
-                          <p className="mt-2 text-neutral-700 leading-relaxed">
+                        <div className="p-4 bg-surface rounded-lg border border-line">
+                          <h3 className="text-sm font-semibold text-ink-secondary uppercase tracking-wide">Prices</h3>
+                          <p className="mt-2 text-ink-secondary leading-relaxed">
                             {generatedItinerary.bestTimeToVisit.prices}
                           </p>
                         </div>
@@ -1293,29 +1296,29 @@ export default function EnhancedItineraryPage() {
 
                 {/* AI Generated Overview */}
                 {generatedItinerary.overview && (
-                  <Card className="mt-8 border-2 border-neutral-200 bg-neutral-50">
+                  <Card className="mt-8 border border-line bg-surface-sunken">
                     <CardHeader>
                       <CardTitle className="flex items-center text-xl">
-                        <SparklesIcon className="w-6 h-6 mr-2 text-black" />
+                        <Sparkle className="w-6 h-6 mr-2 text-ink" />
                         Trip Overview
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <p className="text-neutral-700 leading-relaxed text-lg">
+                      <p className="text-ink-secondary leading-relaxed text-lg">
                         {generatedItinerary.overview}
                       </p>
                       
                       {generatedItinerary.highlights && generatedItinerary.highlights.length > 0 && (
                         <div className="mt-6">
-                          <h4 className="text-lg font-semibold text-black mb-4 flex items-center">
-                            <StarIcon className="w-5 h-5 mr-2 text-black" />
+                          <h3 className="text-lg font-semibold text-ink mb-4 flex items-center">
+                            <Star className="w-5 h-5 mr-2 text-ink" />
                             Trip Highlights
-                          </h4>
+                          </h3>
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             {generatedItinerary.highlights.map((highlight: string, index: number) => (
-                              <div key={index} className="flex items-center space-x-2 p-3 bg-white rounded-lg border border-neutral-200">
-                                <StarIcon className="w-4 h-4 text-black flex-shrink-0" />
-                                <span className="text-neutral-700">{highlight}</span>
+                              <div key={index} className="flex items-center space-x-2 p-3 bg-surface rounded-lg border border-line">
+                                <Star className="w-4 h-4 text-ink flex-shrink-0" />
+                                <span className="text-ink-secondary">{highlight}</span>
                               </div>
                             ))}
                           </div>
@@ -1326,9 +1329,10 @@ export default function EnhancedItineraryPage() {
                 )}
               </>
             )}
-          </motion.div>
+          </div>
         )}
-      </div>
-    </div>
+      </AppShell>
+      <SiteFooter />
+    </>
   );
 }

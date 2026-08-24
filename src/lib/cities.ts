@@ -173,7 +173,7 @@ export const cities: City[] = [
 ];
 
 /**
- * Canonical city name resolver — the single source of truth for city aliases.
+ * Canonical city name resolver, the single source of truth for city aliases.
  * Different sources spell the same city differently (New Delhi/Delhi,
  * Kolkata/Calcutta, Chennai/Madras, Mumbai/Bombay, Bangalore/Bengaluru); this
  * maps every known alias to one primary name so search, predictions and

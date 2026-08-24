@@ -2,13 +2,16 @@
 
 import React, { useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Minus, Plus, TrendUp } from '@phosphor-icons/react/ssr';
 import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { Field } from '@/components/ui/field';
 import { SearchParams } from '@/types/travel';
 import CityAutocomplete from '@/components/ui/CityAutocomplete';
 import { DateRangePicker, DatePicker } from '@/components/ui/date-picker';
 import { City } from '@/lib/cities';
-import { SparklesIcon, ClockIcon } from '@heroicons/react/24/outline';
+import { cn } from '@/lib/utils';
 
 interface SearchFormProps {
   onSearch: (params: SearchParams, useMLPredictions: boolean) => void;
@@ -24,6 +27,14 @@ interface SearchFormData {
   travelClass: 'economy' | 'premium' | 'business' | 'first';
 }
 
+type FieldErrors = Partial<Record<'origin' | 'destination' | 'departure' | 'return', string>>;
+
+const passengerRows = [
+  { key: 'adults', label: 'Adults', min: 1 },
+  { key: 'children', label: 'Children', min: 0 },
+  { key: 'infants', label: 'Infants', min: 0 },
+] as const;
+
 export default function SearchForm({ onSearch, loading = false }: SearchFormProps) {
   const [tripType, setTripType] = useState<'one-way' | 'round-trip'>('one-way');
   const [originCity, setOriginCity] = useState<City | null>(null);
@@ -31,278 +42,222 @@ export default function SearchForm({ onSearch, loading = false }: SearchFormProp
   const [useMLPredictions, setUseMLPredictions] = useState(false);
   const [departureDate, setDepartureDate] = useState<Date | undefined>(undefined);
   const [returnDate, setReturnDate] = useState<Date | undefined>(undefined);
+  // Cities and dates live outside react-hook-form, so their errors are tracked here
+  // and rendered inline. Previously all three cases went to window.alert().
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-    watch,
-    setValue,
-  } = useForm<SearchFormData>({
-    defaultValues: {
-      adults: 1,
-      children: 0,
-      infants: 0,
-      travelClass: 'economy',
-    },
+  const { handleSubmit, register, watch, setValue } = useForm<SearchFormData>({
+    defaultValues: { adults: 1, children: 0, infants: 0, travelClass: 'economy' },
   });
 
   const onSubmit = (data: SearchFormData) => {
-    if (!originCity || !destinationCity) {
-      alert('Please select valid cities for both origin and destination');
-      return;
+    const next: FieldErrors = {};
+    if (!originCity) next.origin = 'Pick a departure city from the list.';
+    if (!destinationCity) next.destination = 'Pick a destination city from the list.';
+    if (originCity && destinationCity && originCity.code === destinationCity.code) {
+      next.destination = 'Departure and destination cannot be the same city.';
     }
+    if (!departureDate) next.departure = 'Choose a departure date.';
+    if (tripType === 'round-trip' && !returnDate) next.return = 'Choose a return date.';
 
-    if (!departureDate) {
-      alert('Please select a departure date');
-      return;
-    }
+    setFieldErrors(next);
+    if (Object.keys(next).length > 0) return;
 
-    if (tripType === 'round-trip' && !returnDate) {
-      alert('Please select a return date for round-trip');
-      return;
-    }
-
-    const searchParams: SearchParams = {
-      origin: {
-        id: '1',
-        name: originCity.name,
-        code: originCity.code,
-        city: originCity.name,
-        country: originCity.country,
-        type: 'airport',
+    onSearch(
+      {
+        origin: {
+          id: '1',
+          name: originCity!.name,
+          code: originCity!.code,
+          city: originCity!.name,
+          country: originCity!.country,
+          type: 'airport',
+        },
+        destination: {
+          id: '2',
+          name: destinationCity!.name,
+          code: destinationCity!.code,
+          city: destinationCity!.name,
+          country: destinationCity!.country,
+          type: 'airport',
+        },
+        departureDate: departureDate!,
+        returnDate,
+        passengers: { adults: data.adults, children: data.children, infants: data.infants },
+        travelClass: data.travelClass,
       },
-      destination: {
-        id: '2',
-        name: destinationCity.name,
-        code: destinationCity.code,
-        city: destinationCity.name,
-        country: destinationCity.country,
-        type: 'airport',
-      },
-      departureDate: departureDate!,
-      returnDate: returnDate,
-      passengers: {
-        adults: data.adults,
-        children: data.children,
-        infants: data.infants,
-      },
-      travelClass: data.travelClass,
-    };
-
-    onSearch(searchParams, useMLPredictions);
+      useMLPredictions
+    );
   };
 
+  const step = (key: (typeof passengerRows)[number]['key'], delta: number, min: number) =>
+    setValue(key, Math.min(9, Math.max(min, watch(key) + delta)));
+
   return (
-    <Card className="w-full max-w-4xl mx-auto shadow-lg border border-neutral-200 bg-white rounded-2xl">
-      <CardHeader className="space-y-6 p-8">
-        <CardTitle className="text-center text-2xl font-bold text-black">
-          Find Your Perfect Flight
-        </CardTitle>
-        
-        {/* Trip Type Selection */}
-        <div className="flex justify-center space-x-4">
-          <Button
-            type="button"
-            variant={tripType === 'one-way' ? 'default' : 'outline'}
-            onClick={() => setTripType('one-way')}
-            className="px-6 py-2 rounded-xl font-semibold"
-          >
-            One Way
-          </Button>
-          <Button
-            type="button"
-            variant={tripType === 'round-trip' ? 'default' : 'outline'}
-            onClick={() => setTripType('round-trip')}
-            className="px-6 py-2 rounded-xl font-semibold"
-          >
-            Round Trip
-          </Button>
+    <div className="rounded-lg border border-line bg-surface">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-line p-6">
+        {/* Segmented control, not two competing filled buttons. */}
+        <div
+          role="radiogroup"
+          aria-label="Trip type"
+          className="inline-flex rounded-lg border border-line bg-surface-sunken p-1"
+        >
+          {(['one-way', 'round-trip'] as const).map((type) => (
+            <button
+              key={type}
+              type="button"
+              role="radio"
+              aria-checked={tripType === type}
+              onClick={() => setTripType(type)}
+              className={cn(
+                'rounded-md px-4 py-1.5 text-sm transition-colors',
+                tripType === type
+                  ? 'bg-surface font-medium text-ink shadow-xs'
+                  : 'text-ink-secondary hover:text-ink'
+              )}
+            >
+              {type === 'one-way' ? 'One way' : 'Round trip'}
+            </button>
+          ))}
         </div>
 
-        {/* ML Predictions Toggle */}
-        <div className="flex items-center justify-center space-x-3 p-4 bg-neutral-100 rounded-xl border border-neutral-200">
-          <SparklesIcon className="w-5 h-5 text-black" />
-          <label className="flex items-center space-x-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={useMLPredictions}
-              onChange={(e) => setUseMLPredictions(e.target.checked)}
-              className="w-4 h-4 text-black rounded border-neutral-300 focus:ring-neutral-500"
+        <div className="flex items-center gap-3">
+          <Switch id="ml-toggle" checked={useMLPredictions} onCheckedChange={setUseMLPredictions} />
+          <Label htmlFor="ml-toggle" className="flex cursor-pointer items-center gap-2">
+            <TrendUp className="h-4 w-4 text-ink-tertiary" weight="bold" />
+            Fare predictions
+          </Label>
+        </div>
+      </div>
+
+      {useMLPredictions && (
+        <p className="border-b border-line bg-info px-6 py-3 text-sm text-info-fg">
+          Predictions cover flights between Delhi, Mumbai, Bengaluru, Chennai, Hyderabad and
+          Kolkata. Other routes still return live fares, without a forecast.
+        </p>
+      )}
+
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 p-6">
+        <div className="grid gap-5 md:grid-cols-2">
+          <Field label="From" htmlFor="origin-city" error={fieldErrors.origin}>
+            <CityAutocomplete
+              id="origin-city"
+              value={originCity?.name || ''}
+              onChange={(city) => {
+                setOriginCity(city);
+                setFieldErrors((e) => ({ ...e, origin: undefined }));
+              }}
+              placeholder="Delhi"
+              mlMode={useMLPredictions}
+              invalid={Boolean(fieldErrors.origin)}
             />
-            <span className="text-sm font-semibold text-neutral-700">
-              Enable ML Price Predictions & Analysis
-            </span>
-          </label>
-          <ClockIcon className="w-5 h-5 text-neutral-600" />
+          </Field>
+          <Field label="To" htmlFor="destination-city" error={fieldErrors.destination}>
+            <CityAutocomplete
+              id="destination-city"
+              value={destinationCity?.name || ''}
+              onChange={(city) => {
+                setDestinationCity(city);
+                setFieldErrors((e) => ({ ...e, destination: undefined }));
+              }}
+              placeholder="Goa"
+              mlMode={useMLPredictions}
+              invalid={Boolean(fieldErrors.destination)}
+            />
+          </Field>
         </div>
-        
-        {useMLPredictions && (
-          <div className="space-y-3">
-            <div className="text-center p-3 bg-blue-50 border border-blue-200 rounded-xl">
-              <p className="text-sm text-blue-800">
-                <strong>ML Predictions enabled:</strong> Get AI-powered price forecasts, savings recommendations, and price trend analysis.
-              </p>
-            </div>
-            <div className="text-center p-3 bg-amber-50 border border-amber-200 rounded-xl">
-              <p className="text-sm text-amber-800">
-                <strong>Available Cities:</strong> Delhi, Mumbai, Bangalore, Chennai, Hyderabad, Kolkata
-              </p>
-              <p className="text-xs text-amber-700 mt-1">
-                ML predictions are available for flights between these 6 Indian cities from our 300K+ flight dataset.
-              </p>
-            </div>
-          </div>
-        )}
-      </CardHeader>
 
-      <CardContent className="p-8">
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-          {/* Origin and Destination */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <label className="text-sm font-bold text-black">From</label>
-              <CityAutocomplete
-                value={originCity?.name || ''}
-                onChange={(city, inputValue) => setOriginCity(city)}
-                placeholder="Select origin city"
-                mlMode={useMLPredictions}
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-bold text-black">To</label>
-              <CityAutocomplete
-                value={destinationCity?.name || ''}
-                onChange={(city, inputValue) => setDestinationCity(city)}
-                placeholder="Select destination city"
-                mlMode={useMLPredictions}
-              />
-            </div>
-          </div>
-
-          {/* Dates */}
-          {tripType === 'round-trip' ? (
+        {tripType === 'round-trip' ? (
+          <div className="space-y-2">
             <DateRangePicker
               startDate={departureDate}
               endDate={returnDate}
-              onStartDateChange={setDepartureDate}
-              onEndDateChange={setReturnDate}
+              onStartDateChange={(d) => {
+                setDepartureDate(d);
+                setFieldErrors((e) => ({ ...e, departure: undefined }));
+              }}
+              onEndDateChange={(d) => {
+                setReturnDate(d);
+                setFieldErrors((e) => ({ ...e, return: undefined }));
+              }}
             />
-          ) : (
-            <div className="space-y-2">
-              <label className="text-sm font-bold text-black">Departure Date</label>
-              <DatePicker
-                date={departureDate}
-                onDateChange={setDepartureDate}
-                placeholder="Select departure date"
-              />
-            </div>
-          )}
-
-          {/* Passengers and Class */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-4">
-              <label className="text-sm font-bold text-black">Passengers</label>
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-neutral-600">Adults</span>
-                  <div className="flex items-center space-x-3">
-                    <button
-                      type="button"
-                      onClick={() => setValue('adults', Math.max(1, watch('adults') - 1))}
-                      className="w-8 h-8 rounded-full border-2 border-neutral-200 flex items-center justify-center hover:border-black transition-colors"
-                    >
-                      -
-                    </button>
-                    <span className="text-sm font-medium w-6 text-center">{watch('adults')}</span>
-                    <button
-                      type="button"
-                      onClick={() => setValue('adults', Math.min(9, watch('adults') + 1))}
-                      className="w-8 h-8 rounded-full border-2 border-neutral-200 flex items-center justify-center hover:border-black transition-colors"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-neutral-600">Children</span>
-                  <div className="flex items-center space-x-3">
-                    <button
-                      type="button"
-                      onClick={() => setValue('children', Math.max(0, watch('children') - 1))}
-                      className="w-8 h-8 rounded-full border-2 border-neutral-200 flex items-center justify-center hover:border-black transition-colors"
-                    >
-                      -
-                    </button>
-                    <span className="text-sm font-medium w-6 text-center">{watch('children')}</span>
-                    <button
-                      type="button"
-                      onClick={() => setValue('children', Math.min(9, watch('children') + 1))}
-                      className="w-8 h-8 rounded-full border-2 border-neutral-200 flex items-center justify-center hover:border-black transition-colors"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-neutral-600">Infants</span>
-                  <div className="flex items-center space-x-3">
-                    <button
-                      type="button"
-                      onClick={() => setValue('infants', Math.max(0, watch('infants') - 1))}
-                      className="w-8 h-8 rounded-full border-2 border-neutral-200 flex items-center justify-center hover:border-black transition-colors"
-                    >
-                      -
-                    </button>
-                    <span className="text-sm font-medium w-6 text-center">{watch('infants')}</span>
-                    <button
-                      type="button"
-                      onClick={() => setValue('infants', Math.min(9, watch('infants') + 1))}
-                      className="w-8 h-8 rounded-full border-2 border-neutral-200 flex items-center justify-center hover:border-black transition-colors"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            <div className="space-y-2">
-              <label className="text-sm font-bold text-black">Travel Class</label>
-              <select
-                {...register('travelClass')}
-                className="w-full h-12 rounded-xl border-2 border-neutral-200 focus:border-black bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-200"
-              >
-                <option value="economy">Economy</option>
-                <option value="premium">Premium Economy</option>
-                <option value="business">Business</option>
-                <option value="first">First Class</option>
-              </select>
-            </div>
-          </div>
-
-          <Button
-            type="submit"
-            className="w-full h-14 text-lg font-bold rounded-xl transition-all duration-300 transform hover:scale-105 shadow-lg bg-black hover:bg-neutral-800 text-white"
-            disabled={loading}
-          >
-            {loading ? (
-              <div className="flex items-center justify-center space-x-2">
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-                <span>Searching Real-time Flight Data...</span>
-              </div>
-            ) : (
-              <div className="flex items-center justify-center space-x-2">
-                <SparklesIcon className="w-5 h-5" />
-                <span>
-                  Search Real-time Flights{useMLPredictions ? ' with ML Predictions' : ''}
-                </span>
-                <ClockIcon className="w-5 h-5" />
-              </div>
+            {(fieldErrors.departure || fieldErrors.return) && (
+              <p role="alert" className="text-xs font-medium text-neg-fg">
+                {fieldErrors.departure ?? fieldErrors.return}
+              </p>
             )}
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
+          </div>
+        ) : (
+          <Field label="Departure date" htmlFor="departure-date" error={fieldErrors.departure}>
+            <DatePicker
+              date={departureDate}
+              onDateChange={(d) => {
+                setDepartureDate(d);
+                setFieldErrors((e) => ({ ...e, departure: undefined }));
+              }}
+              placeholder="Select a date"
+            />
+          </Field>
+        )}
+
+        <div className="grid gap-6 md:grid-cols-2">
+          <fieldset>
+            <legend className="text-sm font-medium text-ink">Passengers</legend>
+            <div className="mt-3 divide-y divide-line rounded-md border border-line">
+              {passengerRows.map((row) => (
+                <div key={row.key} className="flex items-center justify-between px-4 py-2.5">
+                  <span className="text-sm text-ink-secondary">{row.label}</span>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      aria-label={`One fewer ${row.label.toLowerCase()}`}
+                      onClick={() => step(row.key, -1, row.min)}
+                    >
+                      <Minus className="h-3.5 w-3.5" weight="bold" />
+                    </Button>
+                    <output
+                      aria-label={`${row.label} count`}
+                      className="w-7 text-center font-mono text-sm text-ink"
+                    >
+                      {watch(row.key)}
+                    </output>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      aria-label={`One more ${row.label.toLowerCase()}`}
+                      onClick={() => step(row.key, 1, row.min)}
+                    >
+                      <Plus className="h-3.5 w-3.5" weight="bold" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </fieldset>
+
+          <Field label="Cabin class" htmlFor="travel-class">
+            <select
+              id="travel-class"
+              {...register('travelClass')}
+              className="h-10 w-full rounded-md border border-line-strong bg-surface px-3 text-sm text-ink transition-colors hover:border-ink/25 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15"
+            >
+              <option value="economy">Economy</option>
+              <option value="premium">Premium economy</option>
+              <option value="business">Business</option>
+              <option value="first">First</option>
+            </select>
+          </Field>
+        </div>
+
+        <Button type="submit" size="lg" className="w-full" disabled={loading}>
+          {loading ? 'Searching' : useMLPredictions ? 'Search and predict' : 'Search flights'}
+        </Button>
+      </form>
+    </div>
   );
 }
