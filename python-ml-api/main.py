@@ -34,14 +34,23 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS middleware
+# CORS middleware.
+# Deployed origins are supplied via ALLOWED_ORIGINS (comma separated) so the
+# host does not have to be edited into the source on every redeploy.
+_default_origins = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "https://triptactix.blackburn1910.workers.dev",
+]
+_env_origins = [
+    origin.strip()
+    for origin in os.getenv("ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000", 
-        "http://localhost:3001", 
-        "https://your-domain.com"
-    ],
+    allow_origins=_env_origins or _default_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

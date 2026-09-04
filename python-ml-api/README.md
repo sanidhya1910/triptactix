@@ -1,3 +1,13 @@
+---
+title: Triptactix ML API
+emoji: 📈
+colorFrom: green
+colorTo: gray
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # TripTactix ML API
 
 Real machine learning-powered flight price prediction API using Python, FastAPI, and scikit-learn.
