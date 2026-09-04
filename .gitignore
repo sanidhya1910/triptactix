@@ -64,3 +64,6 @@ src/lib/rapidapi.ts
 RESEARCH_PAPER_CONTEXT.txt
 
 research_paper.tex
+# Cloudflare Workers (OpenNext)
+.open-next
+.wrangler

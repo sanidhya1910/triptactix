@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "triptactix",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-09-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "observability": {
+    "enabled": true
+  },
+  // Retained from the previous Pages config. Currently unused at runtime:
+  // the only Prisma entry point (src/lib/auth/config.ts) is dead code.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "triptactix-db",
+      "database_id": "9364b3a4-22a8-42ab-9d10-a382313bcb54"
+    }
+  ]
+}
