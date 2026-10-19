@@ -15,6 +15,7 @@ interface NavbarProps {
 const navItems = [
   { href: '/search', label: 'Search' },
   { href: '/itinerary', label: 'AI planner' },
+  { href: '/planner', label: 'Budget planner' },
   { href: '/dashboard', label: 'My trips' },
   { href: '/ml-dashboard', label: 'Fare data' },
 ];
