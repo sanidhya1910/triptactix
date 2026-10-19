@@ -2,12 +2,17 @@ import { describe, expect, it } from 'vitest'
 import { parseState } from './storage'
 import { seedTrip } from './seed'
 
-const valid = () => ({ trip: seedTrip(), dark: true })
+const valid = () => ({ trip: seedTrip() })
 
 describe('parseState', () => {
   it('round-trips a valid saved state', () => {
     const s = valid()
     expect(parseState(JSON.stringify(s))).toEqual(s)
+  })
+
+  it('still loads a trip saved by the previous version, which also stored a dark flag', () => {
+    const trip = seedTrip()
+    expect(parseState(JSON.stringify({ trip, dark: true }))).toEqual({ trip })
   })
 
   it('returns null when nothing is saved', () => {
@@ -20,9 +25,9 @@ describe('parseState', () => {
   })
 
   it('rejects a trip with no days array', () => {
-    // The old loader accepted this, then crashed on initialTrip.days[0].
+    // The original loader accepted this, then crashed on initialTrip.days[0].
     const { days: _days, ...rest } = seedTrip()
-    expect(parseState(JSON.stringify({ trip: rest, dark: false }))).toBeNull()
+    expect(parseState(JSON.stringify({ trip: rest }))).toBeNull()
   })
 
   it('rejects an item with an unknown kind', () => {
@@ -35,9 +40,5 @@ describe('parseState', () => {
     const s = valid()
     ;(s.trip.wholeTrip[0] as { amount: unknown }).amount = '30000'
     expect(parseState(JSON.stringify(s))).toBeNull()
-  })
-
-  it('treats a missing dark flag as light mode', () => {
-    expect(parseState(JSON.stringify({ trip: seedTrip() }))?.dark).toBe(false)
   })
 })

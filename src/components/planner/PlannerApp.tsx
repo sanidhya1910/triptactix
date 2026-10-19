@@ -1,5 +1,6 @@
 'use client'
 
+import { useMemo, useState } from 'react'
 import {
   DndContext,
   DragOverlay,
@@ -13,22 +14,24 @@ import {
 } from '@dnd-kit/core'
 import type { CollisionDetection, DragEndEvent, DragStartEvent } from '@dnd-kit/core'
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable'
-import { useState } from 'react'
-import { Navbar } from '@/components/layout/Navbar'
-import { plannerDisplay, plannerSans } from './fonts'
-import { WHOLE } from '@/lib/planner/types'
-import type { ItemKind } from '@/lib/planner/types'
-import { ConfirmDialog, Toast } from './Overlays'
-import { CostSplit } from './CostSplit'
-import { DayCard } from './DayCard'
-import { PrintSummary } from './PrintSummary'
-import { TileLibrary } from './TileLibrary'
-import { TripHeader } from './TripHeader'
-import { WholeTripCard } from './WholeTripCard'
-import { AutoTextarea, KindDot } from './ui'
+import { DownloadSimple, Plus, Printer } from '@phosphor-icons/react/ssr'
+import { AppShell } from '@/components/layout/AppShell'
+import { SiteFooter } from '@/components/layout/SiteFooter'
+import { Button } from '@/components/ui/button'
+import { formatINR } from '@/lib/planner/calc'
 import { containerOf, useTrip } from '@/lib/planner/store'
+import type { Item } from '@/lib/planner/types'
+import { KINDS, WHOLE } from '@/lib/planner/types'
+import { DayCard, dayTitleId } from './DayCard'
+import { RemoveDayDialog, UndoToasts } from './Feedback'
+import { KindTile } from './kinds'
+import { PrintSummary } from './PrintSummary'
+import { SharedCosts } from './SharedCosts'
+import { MobileTotalBar, Summary } from './Summary'
+import { TripDetails } from './TripDetails'
+import { focusSoon } from './ui'
 
-/** Prefer the item under the pointer, then the container, then fall back to rectangle overlap. */
+/** Prefer the item under the pointer, then the card, then fall back to rectangle overlap. */
 const collision: CollisionDetection = (args) => {
   const hits = pointerWithin(args)
   if (hits.length) {
@@ -38,113 +41,134 @@ const collision: CollisionDetection = (args) => {
   return rectIntersection(args)
 }
 
-interface Overlay {
-  label: string
-  kind: ItemKind
+function exportJson() {
+  const { trip } = useTrip.getState()
+  const blob = new Blob([JSON.stringify(trip, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${(trip.title || 'trip').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.json`
+  a.click()
+  // Revoking in the same tick can cancel the download in some browsers.
+  setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 export default function PlannerApp() {
   const trip = useTrip((s) => s.trip)
-  const dark = useTrip((s) => s.dark)
-  const { setNotes, addDay } = useTrip.getState()
-  const [overlay, setOverlay] = useState<Overlay | null>(null)
+  const addDay = useTrip((s) => s.addDay)
+  const [dragging, setDragging] = useState<Item | null>(null)
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
-    // Space lifts, so that Enter stays free for "add this tile".
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
       keyboardCodes: { start: ['Space'], cancel: ['Escape'], end: ['Space'] },
     }),
   )
 
+  // Suggest place names already used on this trip, so a stop typed once is one pick away.
+  const places = useMemo(() => {
+    const used = [...trip.wholeTrip, ...trip.days.flatMap((d) => d.items)]
+      .filter((i) => i.kind === 'place')
+      .map((i) => i.title.trim())
+    return [...new Set([...trip.customPlaces, ...used].filter(Boolean))].sort((a, b) => a.localeCompare(b))
+  }, [trip])
+
   const onStart = (e: DragStartEvent) => {
-    const d = e.active.data.current
-    if (d?.type === 'tile') setOverlay({ label: d.label, kind: d.kind })
-    else {
-      const t = useTrip.getState().trip
-      const item = [...t.wholeTrip, ...t.days.flatMap((x) => x.items)].find((i) => i.id === e.active.id)
-      if (item) setOverlay({ label: item.title || 'Item', kind: item.kind })
-    }
+    const t = useTrip.getState().trip
+    setDragging([...t.wholeTrip, ...t.days.flatMap((d) => d.items)].find((i) => i.id === e.active.id) ?? null)
   }
 
   const onEnd = (e: DragEndEvent) => {
-    setOverlay(null)
+    setDragging(null)
     const { active, over } = e
     if (!over) return
     const store = useTrip.getState()
     const overId = String(over.id)
     const isContainer = overId === WHOLE || store.trip.days.some((d) => d.id === overId)
     const container = isContainer ? overId : containerOf(store.trip, overId)
-    if (!container) return
+    if (!container || String(active.id) === overId) return
     const list = container === WHOLE ? store.trip.wholeTrip : store.trip.days.find((d) => d.id === container)!.items
     const index = isContainer ? list.length : list.findIndex((i) => i.id === overId)
-
-    const data = active.data.current
-    if (data?.type === 'tile') {
-      const id = store.addItem(container, data.kind, data.title)
-      store.moveItem(id, container, index)
-      store.select(container)
-    } else if (String(active.id) !== overId) {
-      store.moveItem(String(active.id), container, index)
-    }
+    store.moveItem(String(active.id), container, index)
   }
 
+  const newDay = () => focusSoon(dayTitleId(addDay()), { scroll: true })
+
   return (
-    <div
-      className={`tp-root ${plannerDisplay.variable} ${plannerSans.variable} ${dark ? 'tp-dark' : ''} min-h-screen bg-tp-bg pt-16 font-tp-sans text-tp-ink`}
-    >
-      <div className="tp-no-print">
-        <Navbar showGetStarted={false} />
-        <TripHeader />
-        <CostSplit />
-        <DndContext
-          sensors={sensors}
-          collisionDetection={collision}
-          onDragStart={onStart}
-          onDragEnd={onEnd}
-          onDragCancel={() => setOverlay(null)}
-        >
-          <div className="flex flex-col lg:flex-row">
-            <TileLibrary />
-            <main className="mx-auto w-full max-w-[1000px] flex-1 space-y-5 px-4 py-6 lg:px-8">
-              <section className="rounded-2xl border-2 border-tp-line bg-tp-surface p-4 sm:p-6">
-                <h2 className="mb-2 text-[26px] font-bold leading-tight">Trip notes</h2>
-                <AutoTextarea
-                  aria-label="Trip notes"
-                  placeholder="Write anything about this trip"
-                  value={trip.notes}
-                  onChange={setNotes}
-                  className="!min-h-24 !text-base"
-                />
-              </section>
-              <WholeTripCard />
-              {trip.days.map((d, i) => (
-                <DayCard key={d.id} day={d} index={i} />
-              ))}
-              <div className="flex flex-wrap items-center gap-3">
-                <button className="tp-btn tp-btn-primary !text-[17px]" onClick={addDay}>
-                  + Add day
-                </button>
-                {trip.days.length === 0 && <span className="text-[17px] text-tp-ink2">No days yet. Add one to start planning.</span>}
+    <>
+      <div className="print:hidden">
+        <AppShell width="wide">
+          <header className="flex flex-wrap items-end justify-between gap-6">
+            <div>
+              <h1 className="text-display-sm text-ink">Budget planner</h1>
+              <p className="mt-3 max-w-xl text-ink-secondary">
+                Cost a trip day by day and watch every rupee add up. Saved on this device only.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={() => window.print()}>
+                <Printer className="h-4 w-4" />
+                Print
+              </Button>
+              <Button variant="outline" size="sm" onClick={exportJson}>
+                <DownloadSimple className="h-4 w-4" />
+                Download
+              </Button>
+            </div>
+          </header>
+
+          <DndContext
+            sensors={sensors}
+            collisionDetection={collision}
+            onDragStart={onStart}
+            onDragEnd={onEnd}
+            onDragCancel={() => setDragging(null)}
+          >
+            <div className="mt-10 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-8">
+              <div className="min-w-0 space-y-5">
+                <TripDetails />
+                <SharedCosts />
+                {trip.days.map((d, i) => (
+                  <DayCard key={d.id} day={d} index={i} />
+                ))}
+                <Button variant="outline" className="h-12 w-full border-dashed text-ink-secondary" onClick={newDay}>
+                  <Plus className="h-4 w-4" weight="bold" />
+                  Add day {trip.days.length + 1}
+                </Button>
               </div>
-            </main>
-          </div>
-          <DragOverlay>
-            {overlay && (
-              <div className="flex min-h-12 items-center gap-2 rounded-xl border-2 border-tp-accent bg-tp-surface px-4 text-[17px] font-semibold shadow-xl">
-                <KindDot kind={overlay.kind} />
-                {overlay.label}
-              </div>
-            )}
-          </DragOverlay>
-        </DndContext>
-        <Toast />
-        <ConfirmDialog />
+
+              <Summary />
+            </div>
+
+            <DragOverlay>
+              {dragging && (
+                <div className="flex items-center gap-2 rounded-md border border-brand bg-surface px-3 py-2 text-sm shadow-lg">
+                  <KindTile kind={dragging.kind} />
+                  <span className="font-medium text-ink">{dragging.title || KINDS[dragging.kind].label}</span>
+                  {dragging.amount > 0 && (
+                    <span className="ml-2 font-mono text-ink-secondary [font-variant-numeric:tabular-nums]">
+                      {formatINR(dragging.amount)}
+                    </span>
+                  )}
+                </div>
+              )}
+            </DragOverlay>
+          </DndContext>
+        </AppShell>
+        <SiteFooter />
+        <MobileTotalBar />
       </div>
+
+      <datalist id="planner-places">
+        {places.map((p) => (
+          <option key={p} value={p} />
+        ))}
+      </datalist>
       <PrintSummary />
-    </div>
+      <RemoveDayDialog />
+      <UndoToasts />
+    </>
   )
 }
-

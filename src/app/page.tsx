@@ -53,6 +53,10 @@ const steps = [
     verb: 'Plan',
     copy: 'Turn the booking into a day-by-day itinerary with costs attached.',
   },
+  {
+    verb: 'Budget',
+    copy: 'Cost each day yourself and watch the total, and each person’s share, add up as you go.',
+  },
 ];
 
 const sampleDay = [
@@ -227,12 +231,17 @@ export default function HomePage() {
                 title="A day, already costed"
                 lead="Every activity the planner returns carries a time, a category and a rupee figure, so the budget adds up before you leave."
               />
-              <Button variant="outline" className="mt-8" asChild>
-                <Link href="/itinerary">
-                  Plan a trip
-                  <ArrowRight className="h-4 w-4" weight="bold" />
-                </Link>
-              </Button>
+              <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-3">
+                <Button variant="outline" asChild>
+                  <Link href="/itinerary">
+                    Plan a trip
+                    <ArrowRight className="h-4 w-4" weight="bold" />
+                  </Link>
+                </Button>
+                <Button variant="link" className="h-auto px-0" asChild>
+                  <Link href="/planner">Or cost one yourself</Link>
+                </Button>
+              </div>
             </div>
 
             <Reveal className="lg:col-span-7">

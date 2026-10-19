@@ -61,30 +61,3 @@ export const seedTrip = (): Trip => ({
     },
   ],
 })
-
-export const DEFAULT_PLACES = [
-  'Bangalore',
-  'Mysore',
-  'Wayanad',
-  'Mangalore',
-  'Mysore Palace',
-  'Chamundi Hills',
-  'Edakkal Caves',
-  'Banasura Sagar Dam',
-  'Panambur Beach',
-]
-
-export interface QuickTile {
-  label: string
-  kind: ItemKind
-  title: string
-}
-
-export const QUICK_TILES: QuickTile[] = [
-  { label: 'Cab ride', kind: 'cab', title: 'Cab ride' },
-  { label: 'Lunch', kind: 'food', title: 'Lunch' },
-  { label: 'Tolls', kind: 'fees', title: 'Tolls' },
-  { label: 'Flight', kind: 'flight', title: 'Flight' },
-  { label: 'Stay', kind: 'stay', title: 'Stay' },
-  { label: 'Note', kind: 'other', title: 'Note' },
-]

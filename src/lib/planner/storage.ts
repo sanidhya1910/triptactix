@@ -6,7 +6,6 @@ import { KINDS } from './types'
  */
 export interface Persisted {
   trip: Trip
-  dark: boolean
 }
 
 const KEY = 'triptactix-planner-v1'
@@ -40,7 +39,9 @@ export function parseState(raw: string | null): Persisted | null {
   try {
     const v: unknown = JSON.parse(raw)
     if (!isObj(v) || !isTrip(v.trip)) return null
-    return { trip: v.trip, dark: v.dark === true }
+    // Earlier versions also saved a `dark` flag. It is ignored rather than rejected,
+    // so trips saved before the planner joined the site theme still load.
+    return { trip: v.trip }
   } catch {
     return null
   }

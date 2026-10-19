@@ -18,8 +18,6 @@ interface Toast {
 
 interface State {
   trip: Trip
-  dark: boolean
-  selected: string // day id or WHOLE
   confirmDayId: string | null
   toast: Toast | null
 
@@ -27,23 +25,19 @@ interface State {
   setStartDate: (v: string) => void
   setTravellers: (v: number) => void
   setNotes: (v: string) => void
-  toggleDark: () => void
-  select: (id: string) => void
 
-  addDay: () => void
+  /** Returns the new day's id. */
+  addDay: () => string
   requestRemoveDay: (id: string) => void
   cancelRemoveDay: () => void
   removeDay: (id: string) => void
   updateDay: (id: string, patch: Partial<Pick<Day, 'title' | 'notes'>>) => void
 
-  addItem: (container: string, kind: ItemKind, title: string) => string
-  addToSelected: (kind: ItemKind, title: string) => void
+  /** Returns the new item's id, so the caller can focus it. */
+  addItem: (container: string, kind: ItemKind, title?: string) => string
   updateItem: (id: string, patch: Partial<Omit<Item, 'id'>>) => void
   removeItem: (id: string) => void
   moveItem: (itemId: string, toContainer: string, toIndex: number) => void
-
-  addPlace: (name: string) => void
-  removePlace: (name: string) => void
 
   undo: () => void
   dismissToast: () => void
@@ -79,8 +73,6 @@ export const useTrip = create<State>((set, get) => {
 
   return {
     trip: initialTrip,
-    dark: persisted?.dark ?? false,
-    selected: initialTrip.days[0]?.id ?? WHOLE,
     confirmDayId: null,
     toast: null,
 
@@ -88,12 +80,11 @@ export const useTrip = create<State>((set, get) => {
     setStartDate: (startDate) => edit((t) => ({ ...t, startDate })),
     setTravellers: (n) => edit((t) => ({ ...t, travellers: Math.max(1, Math.min(50, Math.round(n) || 1)) })),
     setNotes: (notes) => edit((t) => ({ ...t, notes })),
-    toggleDark: () => set((s) => ({ dark: !s.dark })),
-    select: (selected) => set({ selected }),
 
     addDay: () => {
       const day: Day = { id: uid(), title: '', notes: '', items: [] }
-      set((s) => ({ trip: { ...s.trip, days: [...s.trip.days, day] }, selected: day.id }))
+      edit((t) => ({ ...t, days: [...t.days, day] }))
+      return day.id
     },
     requestRemoveDay: (id) => {
       const day = get().trip.days.find((d) => d.id === id)
@@ -107,13 +98,8 @@ export const useTrip = create<State>((set, get) => {
       const index = before.days.findIndex((d) => d.id === id)
       if (index < 0) return
       const day = before.days[index]
-      const after = { ...before, days: before.days.filter((d) => d.id !== id) }
-      set((s) => ({
-        trip: after,
-        confirmDayId: null,
-        selected: s.selected === id ? (after.days[0]?.id ?? WHOLE) : s.selected,
-      }))
-      notify('Day removed', (t) => {
+      set({ trip: { ...before, days: before.days.filter((d) => d.id !== id) }, confirmDayId: null })
+      notify(`Day ${index + 1} removed`, (t) => {
         const days = [...t.days]
         days.splice(Math.min(index, days.length), 0, day)
         return { ...t, days }
@@ -122,17 +108,10 @@ export const useTrip = create<State>((set, get) => {
     updateDay: (id, patch) =>
       edit((t) => ({ ...t, days: t.days.map((d) => (d.id === id ? { ...d, ...patch } : d)) })),
 
-    addItem: (container, kind, title) => {
+    addItem: (container, kind, title = '') => {
       const item = makeItem(kind, title)
       edit((t) => setList(t, container, [...(getList(t, container) ?? []), item]))
       return item.id
-    },
-    addToSelected: (kind, title) => {
-      const { trip, selected } = get()
-      const target = getList(trip, selected) ? selected : WHOLE
-      get().addItem(target, kind, title)
-      const where = target === WHOLE ? 'Whole trip' : `Day ${trip.days.findIndex((d) => d.id === target) + 1}`
-      notify(`Added ${title} to ${where}`)
     },
     updateItem: (id, patch) =>
       edit((t) => mapItems(t, (items) => items.map((i) => (i.id === id ? { ...i, ...patch } : i)))),
@@ -144,8 +123,8 @@ export const useTrip = create<State>((set, get) => {
       const index = list.findIndex((i) => i.id === id)
       const item = list[index]
       edit((t) => mapItems(t, (items) => items.filter((i) => i.id !== id)))
-      notify('Item deleted', (t) => {
-        // If its day was removed in the meantime, put it back under Whole trip.
+      notify(`Removed ${item.title || 'item'}`, (t) => {
+        // If its day was removed in the meantime, put it back under shared costs.
         const target = getList(t, from) ? from : WHOLE
         const items = [...getList(t, target)!]
         items.splice(Math.min(index, items.length), 0, item)
@@ -164,18 +143,6 @@ export const useTrip = create<State>((set, get) => {
         return next
       }),
 
-    addPlace: (name) => {
-      const n = name.trim()
-      if (!n) return
-      edit((t) => (t.customPlaces.includes(n) ? t : { ...t, customPlaces: [...t.customPlaces, n] }))
-    },
-    removePlace: (name) => {
-      edit((t) => ({ ...t, customPlaces: t.customPlaces.filter((p) => p !== name) }))
-      notify(`Removed ${name} from places`, (t) =>
-        t.customPlaces.includes(name) ? t : { ...t, customPlaces: [...t.customPlaces, name] },
-      )
-    },
-
     undo: () => {
       const undo = get().toast?.undo
       if (undo) set((s) => ({ trip: undo(s.trip), toast: null }))
@@ -184,7 +151,7 @@ export const useTrip = create<State>((set, get) => {
   }
 })
 
-useTrip.subscribe((s) => saveState({ trip: s.trip, dark: s.dark }))
+useTrip.subscribe((s) => saveState({ trip: s.trip }))
 
 // Selectors
 export const selectTotal = (s: State) => totalCost(s.trip)

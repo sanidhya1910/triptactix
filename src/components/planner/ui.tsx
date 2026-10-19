@@ -1,31 +1,43 @@
-import { useLayoutEffect, useRef } from 'react'
-import type { TextareaHTMLAttributes } from 'react'
-import type { ItemKind } from '@/lib/planner/types'
+import { forwardRef, useLayoutEffect, useRef } from 'react'
+import type { InputHTMLAttributes, TextareaHTMLAttributes } from 'react'
 import { formatNumber, parseAmount } from '@/lib/planner/calc'
+import { cn } from '@/lib/utils'
 
-export const kindVar = (k: ItemKind) => `var(--k-${k})`
+/**
+ * Reads as plain text until hovered or focused, so a plan looks like a document
+ * rather than a form, while every title is still one click from editable.
+ */
+export const inlineField =
+  'w-full min-w-0 rounded-md border border-transparent bg-transparent px-2 text-ink transition-[border-color,background-color,box-shadow] duration-200 placeholder:text-ink-tertiary hover:border-line focus:border-brand focus:bg-surface focus:outline-none focus:ring-2 focus:ring-brand/15'
 
-export function KindDot({ kind, size = 14 }: { kind: ItemKind; size?: number }) {
-  return (
-    <span
-      aria-hidden
-      className="inline-block shrink-0 rounded-full"
-      style={{ width: size, height: size, background: kindVar(kind) }}
+/** Square, quiet icon button for row and card actions. */
+export const iconButton =
+  'flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-ink-tertiary transition-colors hover:bg-surface-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand'
+
+export const InlineInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(
+  ({ className, onKeyDown, ...props }, ref) => (
+    <input
+      ref={ref}
+      {...props}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') e.currentTarget.blur()
+        onKeyDown?.(e)
+      }}
+      className={cn(inlineField, 'h-9 text-sm', className)}
     />
-  )
-}
+  ),
+)
+InlineInput.displayName = 'InlineInput'
 
-/** Textarea that grows to fit its content. Enter blurs when singleLine. */
+/** Textarea that grows to fit its content instead of scrolling inside itself. */
 export function AutoTextarea({
   value,
   onChange,
-  singleLine,
-  className = '',
+  className,
   ...rest
 }: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'onChange' | 'value'> & {
   value: string
   onChange: (v: string) => void
-  singleLine?: boolean
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
   useLayoutEffect(() => {
@@ -33,10 +45,10 @@ export function AutoTextarea({
       const el = ref.current
       if (!el) return
       el.style.height = 'auto'
-      el.style.height = `${el.scrollHeight + 4}px`
+      el.style.height = `${el.scrollHeight + 2}px`
     }
     fit()
-    // Re-fit once web fonts load and when the width changes, since both change line wrapping.
+    // Wrapping changes once web fonts load and whenever the width changes.
     document.fonts?.ready.then(fit)
     window.addEventListener('resize', fit)
     return () => window.removeEventListener('resize', fit)
@@ -46,31 +58,33 @@ export function AutoTextarea({
       ref={ref}
       rows={1}
       value={value}
-      className={`tp-field ${className}`}
-      onChange={(e) => onChange(singleLine ? e.target.value.replace(/\n/g, ' ') : e.target.value)}
-      onKeyDown={(e) => {
-        if (singleLine && e.key === 'Enter') {
-          e.preventDefault()
-          e.currentTarget.blur()
-        }
-      }}
+      onChange={(e) => onChange(e.target.value)}
+      className={cn(inlineField, 'block resize-none overflow-hidden py-1.5 text-sm leading-relaxed', className)}
       {...rest}
     />
   )
 }
 
+/** Rupee amount. Monospaced and tabular so a column of costs lines up digit for digit. */
 export function AmountInput({
   value,
   onChange,
   label,
+  className,
 }: {
   value: number
   onChange: (n: number) => void
   label: string
+  className?: string
 }) {
   return (
-    <label className="flex min-h-12 items-center rounded-[10px] border-2 border-tp-line bg-tp-surface px-3 focus-within:border-tp-accent hover:border-tp-ink2">
-      <span aria-hidden className="mr-1 text-[17px] font-semibold text-tp-ink2">
+    <label
+      className={cn(
+        'flex h-9 items-center rounded-md border border-line bg-surface px-2.5 transition-[border-color,box-shadow] duration-200 hover:border-line-strong focus-within:border-brand focus-within:ring-2 focus-within:ring-brand/15',
+        className,
+      )}
+    >
+      <span aria-hidden className="mr-1 font-mono text-sm text-ink-tertiary">
         ₹
       </span>
       <input
@@ -80,25 +94,23 @@ export function AmountInput({
         value={value ? formatNumber(value) : ''}
         onChange={(e) => onChange(parseAmount(e.target.value))}
         onFocus={(e) => e.currentTarget.select()}
-        className="w-full min-w-0 bg-transparent text-right text-[17px] font-semibold outline-none"
+        onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+        className="w-full min-w-0 bg-transparent text-right font-mono text-sm text-ink outline-none [font-variant-numeric:tabular-nums] placeholder:text-ink-tertiary"
       />
     </label>
   )
 }
 
-export const GripIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden fill="currentColor">
-    {[5, 9, 13].map((y) => (
-      <g key={y}>
-        <circle cx="6" cy={y} r="1.5" />
-        <circle cx="12" cy={y} r="1.5" />
-      </g>
-    ))}
-  </svg>
-)
-
-export const TrashIcon = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 10v6M14 10v6" />
-  </svg>
-)
+/**
+ * Focus an element once React has committed the render that creates it. Updates from
+ * a click are committed before the next macrotask, so a zero timeout is enough; it is
+ * used instead of requestAnimationFrame, which never fires while frames are throttled.
+ */
+export function focusSoon(id: string, { scroll = false } = {}) {
+  setTimeout(() => {
+    const el = document.getElementById(id)
+    if (!el) return
+    if (scroll) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    ;(el as HTMLElement).focus({ preventScroll: scroll })
+  })
+}

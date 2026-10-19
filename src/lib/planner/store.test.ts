@@ -44,16 +44,27 @@ describe('undo', () => {
     expect(s().trip.days.some((d) => d.id === day.id)).toBe(false)
   })
 
-  it('restores a removed custom place', () => {
-    s().addPlace('Coorg')
-    s().removePlace('Coorg')
-    s().undo()
-    expect(s().trip.customPlaces).toContain('Coorg')
-  })
 
   it('clears the toast after undoing', () => {
     s().removeItem(s().trip.days[0].items[0].id)
     s().undo()
     expect(s().toast).toBeNull()
+  })
+})
+
+describe('adding', () => {
+  it('adds a blank item of the chosen kind to that card and returns its id', () => {
+    const day = s().trip.days[2]
+    const before = day.items.length
+    const id = s().addItem(day.id, 'stay')
+    const items = s().trip.days[2].items
+    expect(items).toHaveLength(before + 1)
+    expect(items.at(-1)).toMatchObject({ id, kind: 'stay', title: '', amount: 0 })
+  })
+
+  it('adds a day at the end and returns its id', () => {
+    const id = s().addDay()
+    expect(s().trip.days.at(-1)?.id).toBe(id)
+    expect(s().trip.days).toHaveLength(5)
   })
 })
