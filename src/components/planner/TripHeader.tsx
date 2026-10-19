@@ -10,7 +10,8 @@ function exportJson() {
   a.href = url
   a.download = `${(trip.title || 'trip').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.json`
   a.click()
-  URL.revokeObjectURL(url)
+  // Revoking in the same tick can cancel the download in some browsers.
+  setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 export function TripHeader() {

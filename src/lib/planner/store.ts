@@ -8,7 +8,12 @@ import { WHOLE } from './types'
 interface Toast {
   id: number
   message: string
-  undo?: Trip
+  /**
+   * Reverses one deletion against the trip as it is when Undo is pressed. This is an
+   * inverse operation rather than a snapshot, so edits made while the toast is showing
+   * are kept instead of being rolled back along with the deletion.
+   */
+  undo?: (current: Trip) => Trip
 }
 
 interface State {
@@ -70,7 +75,7 @@ export const containerOf = (trip: Trip, itemId: string): string | null => {
 
 export const useTrip = create<State>((set, get) => {
   const edit = (fn: (t: Trip) => Trip) => set((s) => ({ trip: fn(s.trip) }))
-  const notify = (message: string, undo?: Trip) => set({ toast: { id: ++toastSeq, message, undo } })
+  const notify = (message: string, undo?: Toast['undo']) => set({ toast: { id: ++toastSeq, message, undo } })
 
   return {
     trip: initialTrip,
@@ -99,13 +104,20 @@ export const useTrip = create<State>((set, get) => {
     cancelRemoveDay: () => set({ confirmDayId: null }),
     removeDay: (id) => {
       const before = get().trip
+      const index = before.days.findIndex((d) => d.id === id)
+      if (index < 0) return
+      const day = before.days[index]
       const after = { ...before, days: before.days.filter((d) => d.id !== id) }
       set((s) => ({
         trip: after,
         confirmDayId: null,
         selected: s.selected === id ? (after.days[0]?.id ?? WHOLE) : s.selected,
       }))
-      notify('Day removed', before)
+      notify('Day removed', (t) => {
+        const days = [...t.days]
+        days.splice(Math.min(index, days.length), 0, day)
+        return { ...t, days }
+      })
     },
     updateDay: (id, patch) =>
       edit((t) => ({ ...t, days: t.days.map((d) => (d.id === id ? { ...d, ...patch } : d)) })),
@@ -126,8 +138,19 @@ export const useTrip = create<State>((set, get) => {
       edit((t) => mapItems(t, (items) => items.map((i) => (i.id === id ? { ...i, ...patch } : i)))),
     removeItem: (id) => {
       const before = get().trip
+      const from = containerOf(before, id)
+      if (!from) return
+      const list = getList(before, from)!
+      const index = list.findIndex((i) => i.id === id)
+      const item = list[index]
       edit((t) => mapItems(t, (items) => items.filter((i) => i.id !== id)))
-      notify('Item deleted', before)
+      notify('Item deleted', (t) => {
+        // If its day was removed in the meantime, put it back under Whole trip.
+        const target = getList(t, from) ? from : WHOLE
+        const items = [...getList(t, target)!]
+        items.splice(Math.min(index, items.length), 0, item)
+        return setList(t, target, items)
+      })
     },
     moveItem: (itemId, toContainer, toIndex) =>
       edit((t) => {
@@ -147,14 +170,15 @@ export const useTrip = create<State>((set, get) => {
       edit((t) => (t.customPlaces.includes(n) ? t : { ...t, customPlaces: [...t.customPlaces, n] }))
     },
     removePlace: (name) => {
-      const before = get().trip
       edit((t) => ({ ...t, customPlaces: t.customPlaces.filter((p) => p !== name) }))
-      notify(`Removed ${name} from places`, before)
+      notify(`Removed ${name} from places`, (t) =>
+        t.customPlaces.includes(name) ? t : { ...t, customPlaces: [...t.customPlaces, name] },
+      )
     },
 
     undo: () => {
       const undo = get().toast?.undo
-      if (undo) set({ trip: undo, toast: null })
+      if (undo) set((s) => ({ trip: undo(s.trip), toast: null }))
     },
     dismissToast: () => set({ toast: null }),
   }
