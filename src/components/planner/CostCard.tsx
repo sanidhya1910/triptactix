@@ -46,7 +46,10 @@ export function CostCard({
   const addItem = useTrip((s) => s.addItem)
   const { setNodeRef, isOver } = useDroppable({ id, data: { type: 'container' } })
 
-  const add = (kind: ItemKind) => focusSoon(itemTitleId(addItem(id, kind)))
+  const add = (kind: ItemKind) => {
+    const itemId = addItem(id, kind)
+    if (itemId) focusSoon(itemTitleId(itemId))
+  }
 
   return (
     <section

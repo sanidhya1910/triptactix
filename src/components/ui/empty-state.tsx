@@ -8,7 +8,7 @@ interface EmptyStateProps {
   action?: React.ReactNode;
   className?: string;
   /** Empty states usually sit directly under the page h1, so h2 is the default. */
-  as?: 'h2' | 'h3';
+  as?: 'h1' | 'h2' | 'h3';
 }
 
 /** A composed starting point, not a blank panel. */

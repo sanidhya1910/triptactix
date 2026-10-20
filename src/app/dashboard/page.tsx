@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   BellRinging,
   BookmarkSimple,
@@ -11,6 +12,7 @@ import {
   MapPin,
   Users,
   ArrowRight,
+  Wallet,
 } from '@phosphor-icons/react/ssr';
 import { toast } from 'sonner';
 import { AppShell } from '@/components/layout/AppShell';
@@ -29,6 +31,7 @@ import {
   getAlerts,
   removeAlert,
   checkAlert,
+  restoreTrip,
   isExpired,
   type CheckResult,
   type SavedTrip,
@@ -36,6 +39,10 @@ import {
   type PriceAlert,
 } from '@/lib/saved-trips';
 import { subscribeToStorage } from '@/lib/storage';
+import { fromItinerary } from '@/lib/planner/from-itinerary';
+import { useTrip as usePlanner } from '@/lib/planner/store';
+import { BudgetCard, tripHref } from '@/components/planner/BudgetList';
+import { UndoToasts } from '@/components/planner/Feedback';
 
 const inr = (n?: number) =>
   n === undefined
@@ -59,6 +66,8 @@ const isUpcoming = (trip: SavedTrip) => {
 };
 
 export default function DashboardPage() {
+  const router = useRouter();
+  const budgets = usePlanner((s) => s.trips);
   const [trips, setTrips] = useState<SavedTrip[]>([]);
   const [searches, setSearches] = useState<RecentSearch[]>([]);
   const [alerts, setAlerts] = useState<PriceAlert[]>([]);
@@ -136,11 +145,26 @@ export default function DashboardPage() {
     }
   };
 
+  const turnIntoBudget = (trip: SavedTrip) => {
+    const budget = fromItinerary(trip.itinerary, {
+      startDate: trip.startDate,
+      travelers: trip.travelers,
+      savedTripId: trip.id,
+    });
+    if (!budget) {
+      toast.error('This saved trip has no itinerary days to turn into a budget');
+      return;
+    }
+    const [id] = usePlanner.getState().addTrips([budget]);
+    router.push(tripHref(id));
+  };
+
   const upcoming = trips.filter(isUpcoming).length;
   const triggered = alerts.filter((a) => a.triggered).length;
   const planned = trips.reduce((sum, t) => sum + (t.totalCost ?? 0), 0);
 
-  const everythingEmpty = trips.length === 0 && searches.length === 0 && alerts.length === 0;
+  const everythingEmpty =
+    trips.length === 0 && searches.length === 0 && alerts.length === 0 && budgets.length === 0;
 
   return (
     <>
@@ -218,9 +242,35 @@ export default function DashboardPage() {
             <Tabs defaultValue="trips" className="mt-12">
               <TabsList>
                 <TabsTrigger value="trips">Trips ({trips.length})</TabsTrigger>
+                <TabsTrigger value="budgets">Budgets ({budgets.length})</TabsTrigger>
                 <TabsTrigger value="alerts">Alerts ({alerts.length})</TabsTrigger>
                 <TabsTrigger value="searches">Searches ({searches.length})</TabsTrigger>
               </TabsList>
+
+              {/* Budgets, from the budget planner. Same cards as the planner's own list. */}
+              <TabsContent value="budgets">
+                {budgets.length === 0 ? (
+                  <EmptyState
+                    as="h3"
+                    icon={<Wallet className="h-6 w-6" />}
+                    title="No budgets yet"
+                    description="Cost a trip day by day in the budget planner, or turn a saved itinerary into one."
+                    action={
+                      <Button asChild>
+                        <Link href="/planner">Open the budget planner</Link>
+                      </Button>
+                    }
+                  />
+                ) : (
+                  <ul className="grid gap-5 md:grid-cols-2">
+                    {[...budgets]
+                      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+                      .map((b) => (
+                        <BudgetCard key={b.id} trip={b} />
+                      ))}
+                  </ul>
+                )}
+              </TabsContent>
 
               {/* Trips */}
               <TabsContent value="trips">
@@ -229,7 +279,7 @@ export default function DashboardPage() {
                     as="h3"
                     icon={<BookmarkSimple className="h-6 w-6" />}
                     title="No saved trips"
-                    description="Itineraries you save from the planner land here."
+                    description="Itineraries you save from the AI itinerary planner land here."
                     action={
                       <Button asChild>
                         <Link href="/itinerary">Plan a trip</Link>
@@ -277,8 +327,9 @@ export default function DashboardPage() {
 
                             {/* Actions pinned to the bottom so they line up across cards. */}
                             <div className="mt-auto flex items-center gap-2 pt-6">
-                              <Button variant="outline" size="sm" asChild>
-                                <Link href="/itinerary">Open planner</Link>
+                              <Button variant="outline" size="sm" onClick={() => turnIntoBudget(trip)}>
+                                <Wallet className="h-4 w-4" />
+                                Turn into a budget
                               </Button>
                               <Button
                                 variant="ghost"
@@ -287,7 +338,9 @@ export default function DashboardPage() {
                                 onClick={() => {
                                   removeTrip(trip.id);
                                   refresh();
-                                  toast.success('Trip removed');
+                                  toast(`Removed ${trip.destination}`, {
+                                    action: { label: 'Undo', onClick: () => { restoreTrip(trip); refresh(); } },
+                                  });
                                 }}
                               >
                                 <Trash className="h-4 w-4" />
@@ -421,6 +474,8 @@ export default function DashboardPage() {
         )}
       </AppShell>
       <SiteFooter />
+      {/* Undo for budgets deleted from the Budgets tab. */}
+      <UndoToasts />
     </>
   );
 }

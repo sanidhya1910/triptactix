@@ -1,6 +1,8 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import {
   DndContext,
   DragOverlay,
@@ -14,22 +16,76 @@ import {
 } from '@dnd-kit/core'
 import type { CollisionDetection, DragEndEvent, DragStartEvent } from '@dnd-kit/core'
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable'
-import { DownloadSimple, Plus, Printer } from '@phosphor-icons/react/ssr'
+import { ArrowLeft, DownloadSimple, MagnifyingGlass, Plus, Printer } from '@phosphor-icons/react/ssr'
 import { AppShell } from '@/components/layout/AppShell'
 import { SiteFooter } from '@/components/layout/SiteFooter'
 import { Button } from '@/components/ui/button'
-import { formatINR } from '@/lib/planner/calc'
-import { containerOf, useTrip } from '@/lib/planner/store'
+import { EmptyState } from '@/components/ui/empty-state'
+import { allItems, formatINR } from '@/lib/planner/calc'
+import { containerOf, useActiveTrip, useTrip } from '@/lib/planner/store'
+import { exportFile } from '@/lib/planner/storage'
 import type { Item } from '@/lib/planner/types'
 import { KINDS, WHOLE } from '@/lib/planner/types'
+import { BudgetList } from './BudgetList'
 import { DayCard, dayTitleId } from './DayCard'
-import { RemoveDayDialog, UndoToasts } from './Feedback'
+import { RemoveDayDialog, RemovePersonDialog, SaveFailedNotice, UndoToasts } from './Feedback'
 import { KindTile } from './kinds'
 import { PrintSummary } from './PrintSummary'
 import { SharedCosts } from './SharedCosts'
 import { MobileTotalBar, Summary } from './Summary'
 import { TripDetails } from './TripDetails'
 import { focusSoon } from './ui'
+
+/**
+ * /planner lists budgets; /planner?trip=<id> opens one. The id is read here, on the
+ * client, so the route itself stays a static page.
+ */
+export default function PlannerRoute() {
+  const tripId = useSearchParams().get('trip')
+  const exists = useTrip((s) => (tripId ? s.trips.some((t) => t.id === tripId) : false))
+  const activeId = useTrip((s) => s.activeId)
+  const setActive = useTrip((s) => s.setActive)
+
+  useEffect(() => {
+    setActive(tripId && exists ? tripId : null)
+  }, [tripId, exists, setActive])
+  useEffect(() => () => setActive(null), [setActive])
+
+  return (
+    <>
+      {!tripId ? (
+        <div className="print:hidden">
+          <BudgetList />
+          <SiteFooter />
+        </div>
+      ) : !exists ? (
+        <TripNotFound />
+      ) : activeId === tripId ? (
+        <Editor />
+      ) : null}
+      <UndoToasts />
+      <SaveFailedNotice />
+    </>
+  )
+}
+
+function TripNotFound() {
+  return (
+    <AppShell width="narrow">
+      <EmptyState
+        icon={<MagnifyingGlass className="h-6 w-6" />}
+        title="That budget isn’t on this device"
+        description="Budgets are saved in this browser only, so a link opened on another device or after clearing site data has nothing to show. If you downloaded it, you can import the file."
+        action={
+          <Button asChild>
+            <Link href="/planner">All budgets</Link>
+          </Button>
+        }
+        as="h1"
+      />
+    </AppShell>
+  )
+}
 
 /** Prefer the item under the pointer, then the card, then fall back to rectangle overlap. */
 const collision: CollisionDetection = (args) => {
@@ -41,20 +97,19 @@ const collision: CollisionDetection = (args) => {
   return rectIntersection(args)
 }
 
-function exportJson() {
-  const { trip } = useTrip.getState()
-  const blob = new Blob([JSON.stringify(trip, null, 2)], { type: 'application/json' })
+function download(name: string, contents: string) {
+  const blob = new Blob([contents], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `${(trip.title || 'trip').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.json`
+  a.download = `${(name || 'trip').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.json`
   a.click()
   // Revoking in the same tick can cancel the download in some browsers.
   setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
-export default function PlannerApp() {
-  const trip = useTrip((s) => s.trip)
+function Editor() {
+  const trip = useActiveTrip()
   const addDay = useTrip((s) => s.addDay)
   const [dragging, setDragging] = useState<Item | null>(null)
 
@@ -69,42 +124,51 @@ export default function PlannerApp() {
 
   // Suggest place names already used on this trip, so a stop typed once is one pick away.
   const places = useMemo(() => {
-    const used = [...trip.wholeTrip, ...trip.days.flatMap((d) => d.items)]
+    const used = allItems(trip)
       .filter((i) => i.kind === 'place')
       .map((i) => i.title.trim())
     return [...new Set([...trip.customPlaces, ...used].filter(Boolean))].sort((a, b) => a.localeCompare(b))
   }, [trip])
 
-  const onStart = (e: DragStartEvent) => {
-    const t = useTrip.getState().trip
-    setDragging([...t.wholeTrip, ...t.days.flatMap((d) => d.items)].find((i) => i.id === e.active.id) ?? null)
-  }
+  const onStart = (e: DragStartEvent) => setDragging(allItems(trip).find((i) => i.id === e.active.id) ?? null)
 
   const onEnd = (e: DragEndEvent) => {
     setDragging(null)
     const { active, over } = e
     if (!over) return
-    const store = useTrip.getState()
+    const { moveItem } = useTrip.getState()
     const overId = String(over.id)
-    const isContainer = overId === WHOLE || store.trip.days.some((d) => d.id === overId)
-    const container = isContainer ? overId : containerOf(store.trip, overId)
+    const isContainer = overId === WHOLE || trip.days.some((d) => d.id === overId)
+    const container = isContainer ? overId : containerOf(trip, overId)
     if (!container || String(active.id) === overId) return
-    const list = container === WHOLE ? store.trip.wholeTrip : store.trip.days.find((d) => d.id === container)!.items
+    const list = container === WHOLE ? trip.wholeTrip : trip.days.find((d) => d.id === container)!.items
     const index = isContainer ? list.length : list.findIndex((i) => i.id === overId)
-    store.moveItem(String(active.id), container, index)
+    moveItem(String(active.id), container, index)
   }
 
-  const newDay = () => focusSoon(dayTitleId(addDay()), { scroll: true })
+  const newDay = () => {
+    const id = addDay()
+    if (id) focusSoon(dayTitleId(id), { scroll: true })
+  }
 
   return (
     <>
       <div className="print:hidden">
         <AppShell width="wide">
-          <header className="flex flex-wrap items-end justify-between gap-6">
-            <div>
-              <h1 className="text-display-sm text-ink">Budget planner</h1>
+          <Link
+            href="/planner"
+            className="inline-flex items-center gap-1.5 rounded-md text-sm text-ink-secondary transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" weight="bold" />
+            All budgets
+          </Link>
+          <header className="mt-4 flex flex-wrap items-end justify-between gap-6">
+            <div className="min-w-0">
+              <h1 className="text-display-sm break-words text-ink">{trip.title || 'Untitled budget'}</h1>
               <p className="mt-3 max-w-xl text-ink-secondary">
-                Cost a trip day by day and watch every rupee add up. Saved on this device only.
+                {trip.source?.kind === 'itinerary'
+                  ? 'Made from your AI itinerary. The costs are its estimates, so adjust them as you book.'
+                  : 'Saved on this device as you type.'}
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -112,7 +176,7 @@ export default function PlannerApp() {
                 <Printer className="h-4 w-4" />
                 Print
               </Button>
-              <Button variant="outline" size="sm" onClick={exportJson}>
+              <Button variant="outline" size="sm" onClick={() => download(trip.title, exportFile(trip))}>
                 <DownloadSimple className="h-4 w-4" />
                 Download
               </Button>
@@ -168,7 +232,7 @@ export default function PlannerApp() {
       </datalist>
       <PrintSummary />
       <RemoveDayDialog />
-      <UndoToasts />
+      <RemovePersonDialog />
     </>
   )
 }

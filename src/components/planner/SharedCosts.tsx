@@ -1,4 +1,4 @@
-import { useTrip } from '@/lib/planner/store'
+import { useActiveTrip } from '@/lib/planner/store'
 import { WHOLE } from '@/lib/planner/types'
 import { CostCard } from './CostCard'
 
@@ -6,7 +6,7 @@ export const SHARED_ANCHOR = 'shared-costs'
 
 /** Costs that belong to the trip rather than one day, such as flights and long stays. */
 export function SharedCosts() {
-  const items = useTrip((s) => s.trip.wholeTrip)
+  const items = useActiveTrip().wholeTrip
   return (
     <CostCard
       id={WHOLE}

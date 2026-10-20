@@ -1,18 +1,20 @@
 import { useState } from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { DotsSixVertical, NotePencil, Trash } from '@phosphor-icons/react/ssr'
+import { DotsSixVertical, Trash } from '@phosphor-icons/react/ssr'
+import { isSubset, payerOf, sharersOf } from '@/lib/planner/calc'
 import type { Item } from '@/lib/planner/types'
 import { KINDS } from '@/lib/planner/types'
-import { useTrip } from '@/lib/planner/store'
+import { useActiveTrip, useTrip } from '@/lib/planner/store'
 import { cn } from '@/lib/utils'
+import { ItemMenu } from './ItemMenu'
 import { KindTile } from './kinds'
 import { AmountInput, AutoTextarea, InlineInput, focusSoon, iconButton } from './ui'
-
 
 export const itemTitleId = (id: string) => `item-${id}-title`
 
 export function ItemRow({ item }: { item: Item }) {
+  const trip = useActiveTrip()
   const updateItem = useTrip((s) => s.updateItem)
   const removeItem = useTrip((s) => s.removeItem)
   const [noteOpen, setNoteOpen] = useState(item.note !== '')
@@ -21,6 +23,15 @@ export function ItemRow({ item }: { item: Item }) {
 
   const name = item.title || KINDS[item.kind].label
   const noteId = `item-${item.id}-note`
+
+  // Who paid and who shares, said quietly under the name. Only meaningful for groups,
+  // and only once there is money on the cost.
+  const group = trip.people.length > 1
+  const payer = payerOf(trip, item)
+  const subset = isSubset(trip, item)
+  const meta: string[] = []
+  if (group && item.amount > 0) meta.push(payer ? `Paid by ${payer.name || 'unnamed'}` : 'No payer yet')
+  if (group && subset) meta.push(`Shared by ${sharersOf(trip, item).length} of ${trip.people.length}`)
 
   return (
     <li
@@ -53,6 +64,11 @@ export function ItemRow({ item }: { item: Item }) {
           onChange={(e) => updateItem(item.id, { title: e.target.value })}
           className="font-medium"
         />
+        {meta.length > 0 && (
+          <p className={cn('px-2 text-xs', payer || !group ? 'text-ink-tertiary' : 'text-caution-fg')}>
+            {meta.join(' · ')}
+          </p>
+        )}
         {noteOpen && (
           <AutoTextarea
             id={noteId}
@@ -73,21 +89,17 @@ export function ItemRow({ item }: { item: Item }) {
         className="col-start-3 row-start-2 w-32 sm:col-start-4 sm:row-start-1 sm:w-auto"
       />
 
-      {/* Fixed width, so a row with its note open still lines its amount up with the rest. */}
+      {/* Fixed width, so every row lines its amount up with the rest. */}
       <div className="col-start-4 row-start-1 flex justify-end sm:col-start-5">
-        {!noteOpen && (
-          <button
-            type="button"
-            onClick={() => {
-              setNoteOpen(true)
-              focusSoon(noteId)
-            }}
-            aria-label={`Add a note to ${name}`}
-            className={iconButton}
-          >
-            <NotePencil className="h-4 w-4" />
-          </button>
-        )}
+        <ItemMenu
+          item={item}
+          name={name}
+          noteOpen={noteOpen}
+          onAddNote={() => {
+            setNoteOpen(true)
+            focusSoon(noteId)
+          }}
+        />
         <button
           type="button"
           onClick={() => removeItem(item.id)}

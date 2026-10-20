@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -29,7 +30,8 @@ import {
   Check,
   AirplaneTilt,
   Fire,
-  Warning
+  Warning,
+  Wallet
 } from '@phosphor-icons/react/ssr';
 import CityAutocomplete from '@/components/ui/CityAutocomplete';
 import { City } from '@/lib/cities';
@@ -38,6 +40,9 @@ import { GeneratedItinerary } from '@/lib/perplexity-service';
 
 type PlannerErrors = Partial<Record<'destination' | 'startDate' | 'endDate' | 'source', string>>;
 import { saveTrip } from '@/lib/saved-trips';
+import { fromItinerary } from '@/lib/planner/from-itinerary';
+import { useTrip as usePlanner } from '@/lib/planner/store';
+import { tripHref } from '@/components/planner/BudgetList';
 
 interface ItineraryFormData {
   destination: string;
@@ -106,7 +111,10 @@ export default function EnhancedItineraryPage() {
   const [errors, setErrors] = useState<PlannerErrors>({});
   const [isGenerating, setIsGenerating] = useState(false);
   const [hasItinerary, setHasItinerary] = useState(false);
+  const router = useRouter();
   const [isSaved, setIsSaved] = useState(false);
+  // The saved entry's id, so a budget made afterwards can link back to it.
+  const [savedTripId, setSavedTripId] = useState<string | null>(null);
   const [generatedItinerary, setGeneratedItinerary] = useState<GeneratedItinerary | null>(null);
   const [itineraryMeta, setItineraryMeta] = useState<ItineraryMeta | null>(null);
   const [sourceCity, setSourceCity] = useState<City | null>(null);
@@ -235,6 +243,7 @@ export default function EnhancedItineraryPage() {
     
     setIsGenerating(true);
     setIsSaved(false);
+    setSavedTripId(null);
 
     try {
       const requestData = {
@@ -725,24 +734,43 @@ export default function EnhancedItineraryPage() {
                   · {formData.travelers} {formData.travelers === 1 ? 'traveller' : 'travellers'}
                 </p>
               </div>
-              <div className="flex space-x-3 mt-4 md:mt-0">
-                <Button 
-                  variant="outline" 
+              <div className="mt-4 flex flex-wrap gap-3 md:mt-0">
+                <Button
+                  variant="outline"
                   onClick={() => {
                     setHasItinerary(false);
                     setGeneratedItinerary(null);
                     setItineraryMeta(null);
                   }}
-                  className="border hover:border-ink hover:text-ink"
                 >
-                  Edit Trip
+                  Edit trip
                 </Button>
                 <Button
-                  className="bg-ink hover:bg-ink text-surface"
+                  variant="outline"
+                  disabled={!generatedItinerary}
+                  onClick={() => {
+                    if (!generatedItinerary) return;
+                    const budget = fromItinerary(generatedItinerary, {
+                      startDate: formData.startDate || (startDate ? format(startDate, 'yyyy-MM-dd') : ''),
+                      travelers: formData.travelers,
+                      savedTripId: savedTripId ?? undefined,
+                    });
+                    if (!budget) {
+                      toast.error('This itinerary has no days to turn into a budget');
+                      return;
+                    }
+                    const [id] = usePlanner.getState().addTrips([budget]);
+                    router.push(tripHref(id));
+                  }}
+                >
+                  <Wallet className="h-4 w-4" />
+                  Turn into a budget
+                </Button>
+                <Button
                   disabled={isSaved || !generatedItinerary}
                   onClick={() => {
                     if (!generatedItinerary) return;
-                    saveTrip({
+                    const saved = saveTrip({
                       destination: generatedItinerary.destination || destinationCity?.name || formData.destination,
                       flightSource: formData.includeFlight ? sourceCity?.name : undefined,
                       startDate: formData.startDate || (startDate ? format(startDate, 'yyyy-MM-dd') : ''),
@@ -752,7 +780,15 @@ export default function EnhancedItineraryPage() {
                       totalCost: generatedItinerary.budgetBreakdown?.total,
                       itinerary: generatedItinerary,
                     });
+                    if (!saved) {
+                      toast.error('Couldn’t save on this device', {
+                        description: 'Browser storage is full or turned off. Remove an older trip from My trips and try again.',
+                      });
+                      return;
+                    }
+                    setSavedTripId(saved.id);
                     setIsSaved(true);
+                    toast.success('Saved to My trips');
                   }}
                 >
                   {isSaved ? 'Saved' : 'Save trip'}

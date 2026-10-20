@@ -1,4 +1,4 @@
-import { forwardRef, useLayoutEffect, useRef } from 'react'
+import { forwardRef, useLayoutEffect, useRef, useState } from 'react'
 import type { InputHTMLAttributes, TextareaHTMLAttributes } from 'react'
 import { formatNumber, parseAmount } from '@/lib/planner/calc'
 import { cn } from '@/lib/utils'
@@ -65,18 +65,28 @@ export function AutoTextarea({
   )
 }
 
-/** Rupee amount. Monospaced and tabular so a column of costs lines up digit for digit. */
+/**
+ * Rupee amount. Monospaced and tabular so a column of costs lines up digit for digit.
+ *
+ * While focused it shows exactly what was typed and adds commas only on blur. Formatting
+ * on every keystroke rewrote the value under the caret, so deleting the 1 in "3,150"
+ * produced "350" with the caret thrown to the end.
+ */
 export function AmountInput({
   value,
   onChange,
   label,
+  id,
   className,
 }: {
   value: number
   onChange: (n: number) => void
   label: string
+  id?: string
   className?: string
 }) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const shown = draft ?? (value ? formatNumber(value) : '')
   return (
     <label
       className={cn(
@@ -88,12 +98,22 @@ export function AmountInput({
         ₹
       </span>
       <input
+        id={id}
         aria-label={label}
         inputMode="numeric"
         placeholder="0"
-        value={value ? formatNumber(value) : ''}
-        onChange={(e) => onChange(parseAmount(e.target.value))}
-        onFocus={(e) => e.currentTarget.select()}
+        value={shown}
+        onChange={(e) => {
+          // Keep only digits and commas so the caret position the user set stays valid.
+          const typed = e.target.value.replace(/[^0-9,]/g, '')
+          setDraft(typed)
+          onChange(parseAmount(typed))
+        }}
+        onFocus={(e) => {
+          setDraft(value ? String(value) : '')
+          e.currentTarget.select()
+        }}
+        onBlur={() => setDraft(null)}
         onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
         className="w-full min-w-0 bg-transparent text-right font-mono text-sm text-ink outline-none [font-variant-numeric:tabular-nums] placeholder:text-ink-tertiary"
       />

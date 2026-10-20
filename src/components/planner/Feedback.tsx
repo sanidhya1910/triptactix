@@ -9,8 +9,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { formatINR, sumItems } from '@/lib/planner/calc'
-import { useTrip } from '@/lib/planner/store'
+import { allItems, formatINR, sumItems } from '@/lib/planner/calc'
+import { selectActive, useTrip } from '@/lib/planner/store'
 
 /**
  * The store owns undo; this only renders it through the site's sonner toaster.
@@ -41,27 +41,42 @@ export function UndoToasts() {
   return null
 }
 
+/** Says so, once, if the browser stops accepting saves, instead of losing work quietly. */
+export function SaveFailedNotice() {
+  const failed = useTrip((s) => s.saveFailed)
+  useEffect(() => {
+    if (!failed) return
+    sonner.error('Changes aren’t being saved on this device', {
+      id: 'planner-save-failed',
+      description: 'Storage is full or turned off. Download the budget to keep a copy.',
+      duration: Infinity,
+    })
+    return () => {
+      sonner.dismiss('planner-save-failed')
+    }
+  }, [failed])
+  return null
+}
+
 export function RemoveDayDialog() {
+  const trip = useTrip(selectActive)
   const id = useTrip((s) => s.confirmDayId)
-  const day = useTrip((s) => s.trip.days.find((d) => d.id === s.confirmDayId))
-  const index = useTrip((s) => s.trip.days.findIndex((d) => d.id === s.confirmDayId))
   const cancel = useTrip((s) => s.cancelRemoveDay)
   const remove = useTrip((s) => s.removeDay)
+  const index = trip?.days.findIndex((d) => d.id === id) ?? -1
+  const day = index >= 0 ? trip!.days[index] : undefined
 
   return (
-    <Dialog open={!!id && !!day} onOpenChange={(open) => !open && cancel()}>
+    <Dialog open={!!day} onOpenChange={(open) => !open && cancel()}>
       <DialogContent className="max-w-md">
         {day && (
           <>
             <DialogHeader>
               <DialogTitle>Remove day {index + 1}?</DialogTitle>
               <DialogDescription>
-                {day.title || `Day ${index + 1}`} has {day.items.length}{' '}
-                {day.items.length === 1 ? 'cost' : 'costs'} totalling{' '}
-                <span className="font-mono text-ink [font-variant-numeric:tabular-nums]">
-                  {formatINR(sumItems(day.items))}
-                </span>
-                . You can undo this straight after.
+                {day.title || `Day ${index + 1}`} has {day.items.length} {day.items.length === 1 ? 'cost' : 'costs'} totalling{' '}
+                <span className="font-mono text-ink [font-variant-numeric:tabular-nums]">{formatINR(sumItems(day.items))}</span>.
+                You can undo this straight after.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter className="gap-2 sm:gap-0">
@@ -70,6 +85,57 @@ export function RemoveDayDialog() {
               </Button>
               <Button variant="destructive" onClick={() => remove(day.id)}>
                 Remove day
+              </Button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+export function RemovePersonDialog() {
+  const trip = useTrip(selectActive)
+  const id = useTrip((s) => s.confirmPersonId)
+  const cancel = useTrip((s) => s.cancelRemovePerson)
+  const remove = useTrip((s) => s.removePerson)
+  const person = trip?.people.find((p) => p.id === id)
+
+  const items = trip && person ? allItems(trip) : []
+  const paid = items.filter((i) => i.paidBy === person?.id)
+  const shared = items.filter((i) => person && i.sharedBy.includes(person.id))
+  const name = person?.name || 'this traveller'
+
+  return (
+    <Dialog open={!!person} onOpenChange={(open) => !open && cancel()}>
+      <DialogContent className="max-w-md">
+        {person && (
+          <>
+            <DialogHeader>
+              <DialogTitle>Remove {name}?</DialogTitle>
+              <DialogDescription>
+                {paid.length > 0 && (
+                  <>
+                    {name} paid for {paid.length} {paid.length === 1 ? 'cost' : 'costs'} (
+                    <span className="font-mono text-ink [font-variant-numeric:tabular-nums]">{formatINR(sumItems(paid))}</span>
+                    ), which will go back to having no payer.{' '}
+                  </>
+                )}
+                {shared.length > 0 && (
+                  <>
+                    {shared.length} {shared.length === 1 ? 'cost' : 'costs'} shared by a chosen group will no longer include{' '}
+                    {name}.{' '}
+                  </>
+                )}
+                You can undo this straight after.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={cancel} autoFocus>
+                Keep {person.name || 'traveller'}
+              </Button>
+              <Button variant="destructive" onClick={() => remove(person.id)}>
+                Remove
               </Button>
             </DialogFooter>
           </>
