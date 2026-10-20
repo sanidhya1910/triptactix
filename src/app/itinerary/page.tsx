@@ -253,7 +253,6 @@ export default function EnhancedItineraryPage() {
         dietaryRestrictions: formData.dietaryRestrictions
       };
       
-      console.log('Generating itinerary with data:', requestData);
       
       const response = await fetch('/api/itinerary/enhanced', {
         method: 'POST',

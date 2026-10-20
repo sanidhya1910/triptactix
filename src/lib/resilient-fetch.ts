@@ -120,7 +120,6 @@ export async function callMLAPI<T>(
   try {
     // Skip ML API calls during build process
     if (process.env.NEXT_BUILD || process.env.NODE_ENV === 'test') {
-      console.log('Skipping ML API call during build/test');
       return null;
     }
 

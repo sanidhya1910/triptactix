@@ -48,7 +48,6 @@ const enhancedItinerarySchema = z.object({
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    console.log('Received enhanced itinerary request:', body);
     
     const params = enhancedItinerarySchema.parse(body);
     
@@ -98,7 +97,6 @@ export async function POST(request: NextRequest) {
     };
 
   // Generate itinerary using Perplexity
-  console.log('Generating enhanced itinerary with Perplexity...');
   const aiService = new PerplexityItineraryService();
   const itinerary = await aiService.generateEnhancedItinerary(enhancedRequest);
 

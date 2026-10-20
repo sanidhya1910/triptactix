@@ -21,8 +21,8 @@ export default function Error({
       <div className="py-12">
         <h1 className="text-display-sm text-ink">Something broke on this page.</h1>
         <p className="mt-4 text-ink-secondary prose-measure">
-          We could not finish loading it. Trying again usually works. If it keeps happening, the
-          data service behind this screen is probably down.
+          It hit an error we did not expect. Trying again often works. Anything you saved on this
+          device is still there.
         </p>
 
         <div className="mt-9 flex flex-wrap gap-3">

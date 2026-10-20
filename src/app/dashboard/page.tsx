@@ -29,10 +29,13 @@ import {
   getAlerts,
   removeAlert,
   checkAlert,
+  isExpired,
+  type CheckResult,
   type SavedTrip,
   type RecentSearch,
   type PriceAlert,
 } from '@/lib/saved-trips';
+import { subscribeToStorage } from '@/lib/storage';
 
 const inr = (n?: number) =>
   n === undefined
@@ -74,23 +77,32 @@ export default function DashboardPage() {
   useEffect(() => {
     refresh();
     setReady(true);
-    window.addEventListener('tt-storage', refresh);
-    return () => window.removeEventListener('tt-storage', refresh);
+    // Also re-read when another tab changes storage, not only this one.
+    return subscribeToStorage(refresh);
   }, [refresh]);
+
+  const route = (a: PriceAlert) => `${a.origin} to ${a.destination}`;
 
   const checkOne = async (alert: PriceAlert) => {
     setChecking(alert.id);
     try {
-      const updated = await checkAlert(alert);
+      const result = await checkAlert(alert);
       refresh();
-      toast[updated.triggered ? 'success' : 'info'](
-        updated.triggered
-          ? `${alert.origin} to ${alert.destination} is at or below ${inr(alert.targetPrice)}`
-          : `${alert.origin} to ${alert.destination} is still above target`,
-        { description: `Model price ${inr(updated.lastPrice)}` }
-      );
-    } catch {
-      toast.error('Could not check that alert. Please try again.');
+      if (result.status === 'unavailable') {
+        toast.info('The fare prediction model isn’t connected yet', {
+          description: 'Alerts can be checked once it is.',
+        });
+      } else if (result.status === 'failed') {
+        toast.error(`Couldn’t check ${route(alert)}`, { description: 'Try again in a moment.' });
+      } else if (result.alert.triggered) {
+        toast.success(`${route(alert)} is at or below ${inr(alert.targetPrice)}`, {
+          description: `Predicted fare ${inr(result.alert.lastPrice)}`,
+        });
+      } else {
+        toast.info(`${route(alert)} is still above ${inr(alert.targetPrice)}`, {
+          description: `Predicted fare ${inr(result.alert.lastPrice)}`,
+        });
+      }
     } finally {
       setChecking(null);
     }
@@ -99,13 +111,26 @@ export default function DashboardPage() {
   const checkAll = async () => {
     setCheckingAll(true);
     try {
-      for (const alert of getAlerts()) {
-        await checkAlert(alert);
+      const results: CheckResult[] = [];
+      for (const alert of getAlerts().filter((a) => !isExpired(a))) {
+        const result = await checkAlert(alert);
+        results.push(result);
+        // One "not connected" answer means every check will get the same; stop asking.
+        if (result.status === 'unavailable') break;
       }
       refresh();
-      toast.success('All alerts re-checked');
-    } catch {
-      toast.error('Some alerts could not be checked. Please try again.');
+      const count = (s: CheckResult['status']) => results.filter((r) => r.status === s).length;
+      if (count('unavailable')) {
+        toast.info('The fare prediction model isn’t connected yet', {
+          description: 'Alerts can be checked once it is.',
+        });
+      } else if (count('failed')) {
+        toast.error(`${count('failed')} of ${results.length} alerts couldn’t be checked`, {
+          description: 'Try again in a moment.',
+        });
+      } else if (results.length) {
+        toast.success(`Checked ${results.length} ${results.length === 1 ? 'alert' : 'alerts'}`);
+      }
     } finally {
       setCheckingAll(false);
     }

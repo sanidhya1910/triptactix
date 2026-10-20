@@ -3,9 +3,20 @@
 /**
  * Client-side persistence for saved trips, recent searches and price-alert
  * watches. Uses localStorage so it works without auth; the production upgrade
- * path is to move these to the D1/Prisma database keyed by user, with a cron
- * job that re-checks alerts server-side and emails/pushes the user.
+ * path is to move these to the D1 database keyed by user, with a cron job that
+ * re-checks alerts server-side and emails or pushes the user.
  */
+
+import {
+  isFiniteNumber,
+  isOptional,
+  isRecord,
+  isString,
+  readList,
+  removeKey,
+  writeJSON,
+} from '@/lib/storage';
+import { todayISO } from '@/lib/dates';
 
 const KEYS = {
   trips: 'tt_saved_trips',
@@ -49,84 +60,137 @@ export interface PriceAlert {
   triggered?: boolean;
 }
 
-function read<T>(key: string): T[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    return JSON.parse(window.localStorage.getItem(key) || '[]') as T[];
-  } catch {
-    return [];
-  }
-}
+// ---- Validation -------------------------------------------------------------
+// One malformed entry is dropped on read instead of crashing the dashboard.
+const isSavedTrip = (v: unknown): v is SavedTrip =>
+  isRecord(v) &&
+  isString(v.id) &&
+  isString(v.destination) &&
+  isString(v.startDate) &&
+  isString(v.endDate) &&
+  isFiniteNumber(v.travelers) &&
+  isString(v.budget) &&
+  isString(v.savedAt) &&
+  isOptional(isString)(v.flightSource) &&
+  isOptional(isFiniteNumber)(v.totalCost);
 
-function write<T>(key: string, items: T[]): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(key, JSON.stringify(items));
-    window.dispatchEvent(new Event('tt-storage'));
-  } catch {
-    /* quota / disabled storage, ignore */
-  }
-}
+const isRecentSearch = (v: unknown): v is RecentSearch =>
+  isRecord(v) &&
+  isString(v.id) &&
+  isString(v.origin) &&
+  isString(v.destination) &&
+  isString(v.departureDate) &&
+  isString(v.travelClass) &&
+  isString(v.searchedAt) &&
+  isOptional(isFiniteNumber)(v.lowestPrice);
 
-const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+const isPriceAlert = (v: unknown): v is PriceAlert =>
+  isRecord(v) &&
+  isString(v.id) &&
+  isString(v.origin) &&
+  isString(v.destination) &&
+  isString(v.departureDate) &&
+  isString(v.travelClass) &&
+  isFiniteNumber(v.targetPrice) &&
+  isString(v.createdAt) &&
+  isOptional(isString)(v.lastChecked) &&
+  isOptional(isFiniteNumber)(v.lastPrice) &&
+  isOptional((x): x is boolean => typeof x === 'boolean')(v.triggered);
+
+const uid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+const now = () => new Date().toISOString();
 
 // ---- Saved trips -----------------------------------------------------------
-export const getTrips = () => read<SavedTrip>(KEYS.trips);
+export const getTrips = () => readList(KEYS.trips, isSavedTrip);
 
-export function saveTrip(trip: Omit<SavedTrip, 'id' | 'savedAt'>): SavedTrip {
-  const items = getTrips();
-  const entry: SavedTrip = { ...trip, id: uid(), savedAt: new Date().toISOString() };
-  write(KEYS.trips, [entry, ...items].slice(0, 50));
-  return entry;
+export const getTrip = (id: string) => getTrips().find((t) => t.id === id);
+
+/** Returns the saved entry, or null when the browser refused the write (e.g. storage full). */
+export function saveTrip(trip: Omit<SavedTrip, 'id' | 'savedAt'>): SavedTrip | null {
+  const entry: SavedTrip = { ...trip, id: uid(), savedAt: now() };
+  return writeJSON(KEYS.trips, [entry, ...getTrips()].slice(0, 50)) ? entry : null;
 }
 
-export const removeTrip = (id: string) =>
-  write(KEYS.trips, getTrips().filter((t) => t.id !== id));
+export const removeTrip = (id: string) => writeJSON(KEYS.trips, getTrips().filter((t) => t.id !== id));
+
+/** Puts a removed trip back, for undo. */
+export const restoreTrip = (trip: SavedTrip) =>
+  writeJSON(KEYS.trips, [trip, ...getTrips().filter((t) => t.id !== trip.id)].slice(0, 50));
 
 // ---- Recent searches -------------------------------------------------------
-export const getRecentSearches = () => read<RecentSearch>(KEYS.searches);
+export const getRecentSearches = () => readList(KEYS.searches, isRecentSearch);
 
 export function recordSearch(search: Omit<RecentSearch, 'id' | 'searchedAt'>): void {
   const items = getRecentSearches().filter(
-    (s) => !(s.origin === search.origin && s.destination === search.destination &&
-             s.departureDate === search.departureDate));
-  write(KEYS.searches, [{ ...search, id: uid(), searchedAt: new Date().toISOString() }, ...items].slice(0, 15));
+    (s) =>
+      !(s.origin === search.origin && s.destination === search.destination && s.departureDate === search.departureDate),
+  );
+  writeJSON(KEYS.searches, [{ ...search, id: uid(), searchedAt: now() }, ...items].slice(0, 15));
 }
+
+export const clearRecentSearches = () => removeKey(KEYS.searches);
 
 // ---- Price alerts ----------------------------------------------------------
-export const getAlerts = () => read<PriceAlert>(KEYS.alerts);
+export const getAlerts = () => readList(KEYS.alerts, isPriceAlert);
 
-export function addAlert(alert: Omit<PriceAlert, 'id' | 'createdAt'>): PriceAlert {
-  const entry: PriceAlert = { ...alert, id: uid(), createdAt: new Date().toISOString() };
-  write(KEYS.alerts, [entry, ...getAlerts()].slice(0, 50));
-  return entry;
+const sameWatch = (a: Pick<PriceAlert, 'origin' | 'destination' | 'departureDate' | 'travelClass'>, b: typeof a) =>
+  a.origin === b.origin && a.destination === b.destination && a.departureDate === b.departureDate && a.travelClass === b.travelClass;
+
+export type AddAlertResult =
+  | { status: 'added'; alert: PriceAlert }
+  | { status: 'duplicate'; alert: PriceAlert }
+  | { status: 'failed' };
+
+/** Adds an alert unless the same route, date and class is already being watched. */
+export function addAlert(alert: Omit<PriceAlert, 'id' | 'createdAt'>): AddAlertResult {
+  const existing = getAlerts().find((a) => sameWatch(a, alert));
+  if (existing) return { status: 'duplicate', alert: existing };
+  const entry: PriceAlert = { ...alert, id: uid(), createdAt: now() };
+  return writeJSON(KEYS.alerts, [entry, ...getAlerts()].slice(0, 50))
+    ? { status: 'added', alert: entry }
+    : { status: 'failed' };
 }
 
-export const removeAlert = (id: string) =>
-  write(KEYS.alerts, getAlerts().filter((a) => a.id !== id));
+export const removeAlert = (id: string) => writeJSON(KEYS.alerts, getAlerts().filter((a) => a.id !== id));
+
+export const restoreAlert = (alert: PriceAlert) =>
+  writeJSON(KEYS.alerts, [alert, ...getAlerts().filter((a) => a.id !== alert.id)].slice(0, 50));
 
 export function updateAlert(id: string, patch: Partial<PriceAlert>): void {
-  write(KEYS.alerts, getAlerts().map((a) => (a.id === id ? { ...a, ...patch } : a)));
+  writeJSON(KEYS.alerts, getAlerts().map((a) => (a.id === id ? { ...a, ...patch } : a)));
 }
 
-/** Re-check one alert against the live ML prediction; marks it triggered if at/below target. */
-export async function checkAlert(alert: PriceAlert): Promise<PriceAlert> {
+/** An alert whose departure date has passed can never be booked, so it is not checked. */
+export const isExpired = (alert: PriceAlert) => alert.departureDate < todayISO();
+
+export type CheckResult =
+  | { status: 'checked'; alert: PriceAlert }
+  /** The prediction model is not connected, so there is nothing to compare against. */
+  | { status: 'unavailable'; alert: PriceAlert }
+  | { status: 'failed'; alert: PriceAlert };
+
+/**
+ * Compares one alert against the model's predicted fare. This is a manual check: there is
+ * no background job and no notification, and the copy around it must not promise one.
+ */
+export async function checkAlert(alert: PriceAlert): Promise<CheckResult> {
   try {
     const params = new URLSearchParams({
-      from: alert.origin, to: alert.destination, departureDate: alert.departureDate,
+      from: alert.origin,
+      to: alert.destination,
+      departureDate: alert.departureDate,
+      travelClass: alert.travelClass,
     });
     const res = await fetch(`/api/ml/predictions?${params}`);
-    const data = await res.json();
-    const price = typeof data?.predictedPrice === 'number' ? data.predictedPrice : undefined;
-    const patch: Partial<PriceAlert> = {
-      lastChecked: new Date().toISOString(),
-      lastPrice: price,
-      triggered: price !== undefined ? price <= alert.targetPrice : alert.triggered,
-    };
+    const data: unknown = await res.json().catch(() => null);
+    if (res.status === 503) return { status: 'unavailable', alert };
+    const price = isRecord(data) && isFiniteNumber(data.predictedPrice) ? data.predictedPrice : undefined;
+    if (!res.ok || price === undefined) return { status: 'failed', alert };
+
+    const patch: Partial<PriceAlert> = { lastChecked: now(), lastPrice: price, triggered: price <= alert.targetPrice };
     updateAlert(alert.id, patch);
-    return { ...alert, ...patch };
+    return { status: 'checked', alert: { ...alert, ...patch } };
   } catch {
-    updateAlert(alert.id, { lastChecked: new Date().toISOString() });
-    return { ...alert, lastChecked: new Date().toISOString() };
+    return { status: 'failed', alert };
   }
 }
