@@ -59,10 +59,16 @@ export default function FareCalendar({
   onSelectDate,
 }: FareCalendarProps) {
   const [days, setDays] = useState<FareDay[] | null>(null);
+  // A new route starts empty again: reset during render, so the effect only fetches.
+  const key = `${sourceCity}|${destinationCity}|${travelClass}|${daysAhead}`;
+  const [lastKey, setLastKey] = useState(key);
+  if (key !== lastKey) {
+    setLastKey(key);
+    setDays(null);
+  }
 
   useEffect(() => {
     const controller = new AbortController();
-    setDays(null);
     fetch('/api/ml/fare-calendar', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

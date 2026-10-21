@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { AirplaneTilt, ArrowClockwise, ArrowSquareOut, Bed, PlugsConnected, Star } from '@phosphor-icons/react/ssr';
 import SearchForm, { type SearchQuery } from '@/components/search/SearchForm';
@@ -54,6 +54,22 @@ function queryToURL(q: SearchQuery): string {
   return p.toString();
 }
 
+/** Runs a search and returns the state to show. Never throws and never touches React state. */
+async function requestSearch(query: SearchQuery): Promise<State> {
+  try {
+    const res = await fetch('/api/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(query),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.success) return { kind: 'failed', query, message: data?.error ?? 'The search didn’t go through.' };
+    return { kind: 'done', query, data };
+  } catch {
+    return { kind: 'failed', query, message: 'We couldn’t reach the search service. Check your connection and try again.' };
+  }
+}
+
 type State =
   | { kind: 'idle' }
   | { kind: 'loading'; query: SearchQuery }
@@ -65,52 +81,58 @@ function SearchPageInner() {
   const pathname = usePathname();
   const params = useSearchParams();
   const fromURL = useMemo(() => queryFromURL(new URLSearchParams(params.toString())), [params]);
-  const [state, setState] = useState<State>({ kind: 'idle' });
-  const resultsRef = useRef<HTMLDivElement>(null);
-  // Bumps on every search so a slow earlier response can never overwrite a newer one.
-  const seq = useRef(0);
-
-  const run = useCallback(async (query: SearchQuery) => {
-    const id = ++seq.current;
-    // A new search replaces the old results at once, rather than leaving the previous
-    // route's flights on screen under the new route's charts.
-    setState({ kind: 'loading', query });
-    try {
-      const res = await fetch('/api/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(query),
-      });
-      const data = await res.json().catch(() => null);
-      if (id !== seq.current) return;
-      if (!res.ok || !data?.success) {
-        setState({ kind: 'failed', query, message: data?.error ?? 'The search didn’t go through.' });
-        return;
-      }
-      setState({ kind: 'done', query, data });
-      const prices = (data as SearchResponse).flights.items.map((f) => f.price);
-      recordSearch({
-        origin: query.from,
-        destination: query.to,
-        departureDate: query.departureDate,
-        travelClass: query.travelClass,
-        lowestPrice: prices.length ? Math.min(...prices) : undefined,
-      });
-    } catch {
-      if (id === seq.current) setState({ kind: 'failed', query, message: 'We couldn’t reach the search service. Check your connection and try again.' });
-    }
-  }, []);
-
   // The URL is the source of truth: searching updates it, and opening a link runs it.
   const urlKey = fromURL ? queryToURL(fromURL) : '';
+  const [state, setState] = useState<State>(() => (fromURL ? { kind: 'loading', query: fromURL } : { kind: 'idle' }));
+  // A new search replaces the old results at once, rather than leaving the previous
+  // route's flights on screen under the new route's charts. Done during render when the
+  // URL changes; the effect below only fetches.
+  const [lastUrlKey, setLastUrlKey] = useState(urlKey);
+  if (urlKey !== lastUrlKey) {
+    setLastUrlKey(urlKey);
+    setState(fromURL ? { kind: 'loading', query: fromURL } : { kind: 'idle' });
+  }
+  const resultsRef = useRef<HTMLDivElement>(null);
+  // Bumped to run the same search again (a retry, or resubmitting an unchanged search),
+  // since the URL, and so the effect below, would not otherwise change.
+  const [attempt, setAttempt] = useState(0);
+
+  // All fetching happens here, and state is only set in the promise callback. A search
+  // that is replaced before it answers is cancelled, so a slow earlier response can never
+  // overwrite a newer one.
   useEffect(() => {
-    if (fromURL) void run(fromURL);
+    if (!fromURL) return;
+    let cancelled = false;
+    void requestSearch(fromURL).then((next) => {
+      if (cancelled) return;
+      setState(next);
+      if (next.kind === 'done') {
+        const prices = next.data.flights.items.map((f) => f.price);
+        recordSearch({
+          origin: next.query.from,
+          destination: next.query.to,
+          departureDate: next.query.departureDate,
+          travelClass: next.query.travelClass,
+          lowestPrice: prices.length ? Math.min(...prices) : undefined,
+        });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+    // Keyed on the URL text, not the parsed object, which is new on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlKey]);
+  }, [urlKey, attempt]);
+
+  const rerun = () => {
+    if (!fromURL) return;
+    setState({ kind: 'loading', query: fromURL });
+    setAttempt((a) => a + 1);
+  };
 
   const search = (q: SearchQuery) => {
     const next = queryToURL(q);
-    if (next === urlKey) void run(q); // same search again: the URL will not change
+    if (next === urlKey) rerun(); // same search again: the URL will not change
     else router.push(`${pathname}?${next}`, { scroll: false });
   };
 
@@ -150,7 +172,7 @@ function SearchPageInner() {
             <div role="alert" className="mt-14 rounded-lg border border-neg-fg/25 bg-neg p-6">
               <h2 className="font-semibold text-neg-fg">The search didn’t work</h2>
               <p className="mt-1 text-sm text-neg-fg">{state.message}</p>
-              <Button className="mt-4" variant="outline" onClick={() => void run(state.query)}>
+              <Button className="mt-4" variant="outline" onClick={rerun}>
                 <ArrowClockwise className="h-4 w-4" />
                 Try again
               </Button>

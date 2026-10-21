@@ -193,9 +193,16 @@ function EnhancedItineraryPage() {
 
   // /itinerary?saved=<id> shows an itinerary saved earlier, from My trips. "Open planner"
   // there used to link to an empty form, so a saved itinerary could never be seen again.
-  useEffect(() => {
-    if (!savedId) return;
-    const saved = getTrip(savedId);
+  // Loaded during render when the id changes, rather than in an effect that sets state.
+  // This part of the page only renders in the browser (it is under the useSearchParams
+  // boundary), so reading storage here cannot cause a hydration mismatch.
+  const [loadedSavedId, setLoadedSavedId] = useState<string | null>(null);
+  if (savedId && savedId !== loadedSavedId) {
+    setLoadedSavedId(savedId);
+    loadSaved(savedId);
+  }
+  function loadSaved(id: string) {
+    const saved = getTrip(id);
     const snapshot = saved?.itinerary as GeneratedItinerary | undefined;
     if (!saved || !snapshot || !Array.isArray(snapshot.days) || snapshot.days.length === 0) {
       setFailure({ code: 'not_found', message: 'Saved trips live in this browser only, so it may have been removed or saved on another device. Plan a new one below.' });
@@ -218,7 +225,7 @@ function EnhancedItineraryPage() {
     setSavedTripId(saved.id);
     setIsSaved(true);
     setHasItinerary(true);
-  }, [savedId]);
+  }
 
   const travelerRules = useMemo(() => getGroupTravelerRules(formData.groupType), [formData.groupType]);
 
@@ -253,16 +260,8 @@ function EnhancedItineraryPage() {
         ?? calculatedDurationFromForm
     : calculatedDurationFromForm;
 
-  const generatedAtLabel = useMemo(() => {
-    if (!itineraryMeta?.generatedAt) {
-      return null;
-    }
-    const parsed = new Date(itineraryMeta.generatedAt);
-    if (Number.isNaN(parsed.getTime())) {
-      return null;
-    }
-    return format(parsed, 'MMM dd, yyyy • HH:mm');
-  }, [itineraryMeta?.generatedAt]);
+  const generatedAt = itineraryMeta?.generatedAt ? new Date(itineraryMeta.generatedAt) : null;
+  const generatedAtLabel = generatedAt && !Number.isNaN(generatedAt.getTime()) ? format(generatedAt, 'MMM dd, yyyy • HH:mm') : null;
 
   // Every itinerary shown here is from the AI: there is no template fallback any more.
   const sourceLabel = itineraryMeta?.savedAt ? 'Perplexity AI, saved on this device' : itineraryMeta ? 'Perplexity AI' : null;

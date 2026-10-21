@@ -26,8 +26,13 @@ export function Navbar({ showGetStarted = true }: NavbarProps) {
   const toggleRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close on navigation, including back and forward, not only on link clicks.
-  useEffect(() => setMobileOpen(false), [pathname]);
+  // Close on navigation, including back and forward, not only on link clicks. Done during
+  // render when the path changes, which React prefers to an effect that sets state.
+  const [lastPath, setLastPath] = useState(pathname);
+  if (pathname !== lastPath) {
+    setLastPath(pathname);
+    setMobileOpen(false);
+  }
 
   // While open: focus moves into the menu, and Escape closes it and returns focus to the
   // button, so keyboard users are never left behind the overlay.

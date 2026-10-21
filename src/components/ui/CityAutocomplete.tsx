@@ -36,8 +36,26 @@ export default function CityAutocomplete({
 }: CityAutocompleteProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [filteredCities, setFilteredCities] = useState<City[]>([]);
-  const [selectedCity, setSelectedCity] = useState<City | null>(null);
+  // A value set from outside (a link, a saved search) that names a known city counts as
+  // chosen. Otherwise a prefilled form showed "Pick a city from the list" under cities
+  // that were already right.
+  const matchCity = (text: string): City | null => {
+    const wanted = text.trim().toLowerCase();
+    if (!wanted) return null;
+    const pool = mlMode ? ML_DATASET_CITIES : searchCities(text, 50);
+    return pool.find((c) => c.name.toLowerCase() === wanted || `${c.name}, ${c.country}`.toLowerCase() === wanted) ?? null;
+  };
+  const [selectedCity, setSelectedCity] = useState<City | null>(() => matchCity(value));
   const [inputValue, setInputValue] = useState(value);
+  // Follow the value prop during render rather than in an effect that sets state.
+  const [lastValue, setLastValue] = useState(value);
+  if (value !== lastValue) {
+    setLastValue(value);
+    setInputValue(value);
+    const named = (c: City | null) =>
+      !!c && [c.name, `${c.name}, ${c.country}`].some((n) => n.toLowerCase() === value.trim().toLowerCase());
+    if (value.trim() && !named(selectedCity)) setSelectedCity(matchCity(value) ?? selectedCity);
+  }
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [justSelected, setJustSelected] = useState(false);
   
@@ -46,23 +64,6 @@ export default function CityAutocomplete({
 
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setInputValue(value);
-    // A value set from outside (a link, a saved search) that names a known city counts as
-    // chosen. Otherwise a prefilled form showed "Pick a city from the list" under cities
-    // that were already right.
-    const wanted = value.trim().toLowerCase();
-    if (!wanted) return;
-    setSelectedCity((current) => {
-      if (current && (current.name.toLowerCase() === wanted || `${current.name}, ${current.country}`.toLowerCase() === wanted)) {
-        return current;
-      }
-      const pool = mlMode ? ML_DATASET_CITIES : searchCities(value, 50);
-      return pool.find((c) => c.name.toLowerCase() === wanted || `${c.name}, ${c.country}`.toLowerCase() === wanted) ?? current;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
 
   // Sync input field with inputValue state
   useEffect(() => {
@@ -93,14 +94,17 @@ export default function CityAutocomplete({
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value;
+    // Typing a full city name counts as choosing it, and the form is told so; otherwise the
+    // box looked valid while the form still thought no city was picked.
+    const exact = matchCity(newValue);
     setInputValue(newValue);
-    setSelectedCity(null);
+    setSelectedCity(exact);
     setHighlightedIndex(-1);
-    
+
     filterCities(newValue);
     setIsOpen(newValue.length > 0);
-    
-    onChange(null, newValue);
+
+    onChange(exact, newValue);
   };
 
   const handleCitySelect = (city: City) => {

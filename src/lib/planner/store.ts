@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useState } from 'react'
 import { create } from 'zustand'
 import { perPerson, totalCost } from './calc'
 import { blankTrip, makeItem, makePerson, nowISO, seedTrip, uid } from './seed'
@@ -402,9 +402,11 @@ export const selectActive = (s: State): Trip | undefined => s.trips.find((t) => 
  */
 export function useActiveTrip(): Trip {
   const trip = useTrip(selectActive)
-  const last = useRef<Trip | undefined>(trip)
-  if (trip) last.current = trip
-  return (trip ?? last.current ?? EMPTY_TRIP) as Trip
+  // State set during render (guarded, so it cannot loop) rather than a ref: React may
+  // render without committing, and a ref written mid-render would then be wrong.
+  const [last, setLast] = useState<Trip | undefined>(trip)
+  if (trip && trip !== last) setLast(trip)
+  return trip ?? last ?? EMPTY_TRIP
 }
 
 const EMPTY_TRIP: Trip = {

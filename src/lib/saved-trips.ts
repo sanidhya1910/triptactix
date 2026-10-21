@@ -14,9 +14,11 @@ import {
   isString,
   readList,
   removeKey,
+  subscribeToStorage,
   writeJSON,
 } from '@/lib/storage';
 import { todayISO } from '@/lib/dates';
+import { useMemo, useSyncExternalStore } from 'react';
 
 const KEYS = {
   trips: 'tt_saved_trips',
@@ -193,4 +195,31 @@ export async function checkAlert(alert: PriceAlert): Promise<CheckResult> {
   } catch {
     return { status: 'failed', alert };
   }
+}
+
+// ---- Reading everything in a component -------------------------------------
+
+export interface SavedData {
+  trips: SavedTrip[];
+  searches: RecentSearch[];
+  alerts: PriceAlert[];
+}
+
+const rawSnapshot = () => {
+  try {
+    return [KEYS.trips, KEYS.searches, KEYS.alerts].map((k) => window.localStorage.getItem(k) ?? '').join('\u0000');
+  } catch {
+    return '';
+  }
+};
+
+/**
+ * Saved trips, searches and alerts, kept current as they change in this tab or another.
+ * Returns null during server rendering and hydration, when storage cannot be read, so the
+ * page can show a skeleton instead of a flash of the empty state. The lists are parsed
+ * once per change of the stored text, so an unchanged store returns the same objects.
+ */
+export function useSavedData(): SavedData | null {
+  const raw = useSyncExternalStore(subscribeToStorage, rawSnapshot, () => null);
+  return useMemo(() => (raw === null ? null : { trips: getTrips(), searches: getRecentSearches(), alerts: getAlerts() }), [raw]);
 }

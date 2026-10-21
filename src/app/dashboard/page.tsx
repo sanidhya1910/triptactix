@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
@@ -25,10 +25,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/ui/empty-state';
 import { Stat } from '@/components/ui/stat';
 import {
-  getTrips,
   removeTrip,
-  getRecentSearches,
   getAlerts,
+  useSavedData,
   removeAlert,
   checkAlert,
   restoreTrip,
@@ -41,7 +40,6 @@ import {
   type RecentSearch,
   type PriceAlert,
 } from '@/lib/saved-trips';
-import { subscribeToStorage } from '@/lib/storage';
 import { todayISO } from '@/lib/dates';
 import { fromItinerary } from '@/lib/planner/from-itinerary';
 import { useTrip as usePlanner } from '@/lib/planner/store';
@@ -69,30 +67,22 @@ const isUpcoming = (trip: SavedTrip) => {
   return Number.isNaN(end.getTime()) ? true : end >= new Date(new Date().toDateString());
 };
 
+const NONE_TRIPS: SavedTrip[] = [];
+const NONE_SEARCHES: RecentSearch[] = [];
+const NONE_ALERTS: PriceAlert[] = [];
+
 export default function DashboardPage() {
   const router = useRouter();
   const budgets = usePlanner((s) => s.trips);
-  const [trips, setTrips] = useState<SavedTrip[]>([]);
-  const [searches, setSearches] = useState<RecentSearch[]>([]);
-  const [alerts, setAlerts] = useState<PriceAlert[]>([]);
+  // Follows storage as it changes, here or in another tab. Null until it can be read, so
+  // the first paint is a skeleton rather than a flash of the empty state.
+  const saved = useSavedData();
+  const ready = saved !== null;
+  const trips = saved?.trips ?? NONE_TRIPS;
+  const searches = saved?.searches ?? NONE_SEARCHES;
+  const alerts = saved?.alerts ?? NONE_ALERTS;
   const [checking, setChecking] = useState<string | null>(null);
   const [checkingAll, setCheckingAll] = useState(false);
-  // localStorage is only readable after mount, so the first paint is a skeleton
-  // rather than a flash of the empty state.
-  const [ready, setReady] = useState(false);
-
-  const refresh = useCallback(() => {
-    setTrips(getTrips());
-    setSearches(getRecentSearches());
-    setAlerts(getAlerts());
-  }, []);
-
-  useEffect(() => {
-    refresh();
-    setReady(true);
-    // Also re-read when another tab changes storage, not only this one.
-    return subscribeToStorage(refresh);
-  }, [refresh]);
 
   const route = (a: PriceAlert) => `${a.origin} to ${a.destination}`;
 
@@ -100,7 +90,6 @@ export default function DashboardPage() {
     setChecking(alert.id);
     try {
       const result = await checkAlert(alert);
-      refresh();
       if (result.status === 'unavailable') {
         toast.info('The fare prediction model isn’t connected yet', {
           description: 'Alerts can be checked once it is.',
@@ -131,7 +120,6 @@ export default function DashboardPage() {
         // One "not connected" answer means every check will get the same; stop asking.
         if (result.status === 'unavailable') break;
       }
-      refresh();
       const count = (s: CheckResult['status']) => results.filter((r) => r.status === s).length;
       if (count('unavailable')) {
         toast.info('The fare prediction model isn’t connected yet', {
@@ -346,9 +334,8 @@ export default function DashboardPage() {
                                 aria-label={`Delete saved trip to ${trip.destination}`}
                                 onClick={() => {
                                   removeTrip(trip.id);
-                                  refresh();
                                   toast(`Removed ${trip.destination}`, {
-                                    action: { label: 'Undo', onClick: () => { restoreTrip(trip); refresh(); } },
+                                    action: { label: 'Undo', onClick: () => { restoreTrip(trip); } },
                                   });
                                 }}
                               >
@@ -439,9 +426,8 @@ export default function DashboardPage() {
                                   aria-label={`Stop watching ${a.origin} to ${a.destination}`}
                                   onClick={() => {
                                     removeAlert(a.id);
-                                    refresh();
                                     toast(`Stopped watching ${a.origin} to ${a.destination}`, {
-                                      action: { label: 'Undo', onClick: () => { restoreAlert(a); refresh(); } },
+                                      action: { label: 'Undo', onClick: () => { restoreAlert(a); } },
                                     });
                                   }}
                                 >
@@ -481,14 +467,12 @@ export default function DashboardPage() {
                         onClick={() => {
                           const before = searches;
                           clearRecentSearches();
-                          refresh();
                           toast('Recent searches cleared', {
                             action: {
                               label: 'Undo',
                               // Re-record oldest first, so the newest ends up on top again.
                               onClick: () => {
                                 [...before].reverse().forEach(({ id: _id, searchedAt: _at, ...s }) => recordSearch(s));
-                                refresh();
                               },
                             },
                           });

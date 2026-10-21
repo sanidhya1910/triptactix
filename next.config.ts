@@ -1,10 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  eslint: {
-    // Disable ESLint during production builds (you can run it separately)
-    ignoreDuringBuilds: true,
-  },
   typescript: {
     // Enable type checking during builds
     ignoreBuildErrors: false,

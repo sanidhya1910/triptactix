@@ -38,11 +38,18 @@ interface RouteInsightsProps {
 export default function RouteInsights({ from, to, departureDate, travelClass, lowestFare }: RouteInsightsProps) {
   const [history, setHistory] = useState<HistoryState>({ kind: 'loading' });
   const [forecast, setForecast] = useState<ForecastState>({ kind: 'loading' });
+  // A new route or date starts from loading again: reset during render, so the effect only fetches.
+  const key = `${from}|${to}|${departureDate}|${travelClass}`;
+  const [lastKey, setLastKey] = useState(key);
+  if (key !== lastKey) {
+    setLastKey(key);
+    setHistory({ kind: 'loading' });
+    setForecast({ kind: 'loading' });
+  }
 
   useEffect(() => {
     const c = new AbortController();
     const q = new URLSearchParams({ from, to });
-    setHistory({ kind: 'loading' });
     fetch(`/api/ml/route-intel?${q}`, { signal: c.signal })
       .then(async (res) => {
         if (res.status === 404) return setHistory({ kind: 'none' });
@@ -51,7 +58,6 @@ export default function RouteInsights({ from, to, departureDate, travelClass, lo
       })
       .catch(() => !c.signal.aborted && setHistory({ kind: 'error' }));
 
-    setForecast({ kind: 'loading' });
     fetch(`/api/ml/predictions?${new URLSearchParams({ from, to, departureDate, travelClass })}`, { signal: c.signal })
       .then(async (res) => {
         if (res.status === 503) return setForecast({ kind: 'unavailable' });
@@ -196,10 +202,14 @@ function WatchRoute({
 }) {
   const [target, setTarget] = useState(suggested ? String(suggested) : '');
   const [saved, setSaved] = useState(false);
-  useEffect(() => {
+  // A new suggestion or route replaces the target and clears "Watching".
+  const key = `${suggested}|${from}|${to}|${departureDate}`;
+  const [lastKey, setLastKey] = useState(key);
+  if (key !== lastKey) {
+    setLastKey(key);
     setTarget(suggested ? String(suggested) : '');
     setSaved(false);
-  }, [suggested, from, to, departureDate]);
+  }
 
   const save = () => {
     const price = Number(target.replace(/[^0-9]/g, ''));

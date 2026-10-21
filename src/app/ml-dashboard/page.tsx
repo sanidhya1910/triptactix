@@ -34,10 +34,16 @@ type Load<T> = { kind: 'loading' } | { kind: 'ok'; data: T } | { kind: 'error' }
 function useJSON<T>(url: string | null): [Load<T>, () => void] {
   const [state, setState] = useState<Load<T>>({ kind: 'loading' });
   const [attempt, setAttempt] = useState(0);
+  // A new URL or a retry starts from loading: reset during render, so the effect only fetches.
+  const key = `${url}|${attempt}`;
+  const [lastKey, setLastKey] = useState(key);
+  if (key !== lastKey) {
+    setLastKey(key);
+    setState({ kind: 'loading' });
+  }
   useEffect(() => {
     if (!url) return;
     const c = new AbortController();
-    setState({ kind: 'loading' });
     fetch(url, { signal: c.signal })
       .then(async (r) => (r.ok ? setState({ kind: 'ok', data: await r.json() }) : setState({ kind: 'error' })))
       .catch(() => !c.signal.aborted && setState({ kind: 'error' }));
