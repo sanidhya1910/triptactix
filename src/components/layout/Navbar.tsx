@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
@@ -14,7 +14,7 @@ interface NavbarProps {
 
 const navItems = [
   { href: '/search', label: 'Search' },
-  { href: '/itinerary', label: 'AI planner' },
+  { href: '/itinerary', label: 'AI itinerary' },
   { href: '/planner', label: 'Budget planner' },
   { href: '/dashboard', label: 'My trips' },
   { href: '/ml-dashboard', label: 'Fare data' },
@@ -23,6 +23,25 @@ const navItems = [
 export function Navbar({ showGetStarted = true }: NavbarProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const pathname = usePathname();
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close on navigation, including back and forward, not only on link clicks.
+  useEffect(() => setMobileOpen(false), [pathname]);
+
+  // While open: focus moves into the menu, and Escape closes it and returns focus to the
+  // button, so keyboard users are never left behind the overlay.
+  useEffect(() => {
+    if (!mobileOpen) return;
+    menuRef.current?.querySelector<HTMLElement>('a')?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setMobileOpen(false);
+      toggleRef.current?.focus();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [mobileOpen]);
 
   // Active state is derived, not passed in, so it cannot drift from the route.
   const isActive = (href: string) =>
@@ -64,10 +83,12 @@ export function Navbar({ showGetStarted = true }: NavbarProps) {
 
         <div className="md:hidden">
           <Button
+            ref={toggleRef}
             variant="ghost"
             size="icon"
             aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
             aria-expanded={mobileOpen}
+            aria-controls="mobile-menu"
             onClick={() => setMobileOpen((open) => !open)}
           >
             {mobileOpen ? <X className="h-5 w-5" /> : <List className="h-5 w-5" />}
@@ -76,7 +97,7 @@ export function Navbar({ showGetStarted = true }: NavbarProps) {
       </div>
 
       {mobileOpen && (
-        <div className="border-b border-line bg-canvas/95 backdrop-blur-xl md:hidden">
+        <div id="mobile-menu" ref={menuRef} className="border-b border-line bg-canvas/95 backdrop-blur-xl md:hidden">
           <div className="mx-auto max-w-7xl space-y-1 px-5 py-4 sm:px-8">
             {navItems.map((item) => (
               <Link

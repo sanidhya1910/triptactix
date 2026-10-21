@@ -15,6 +15,8 @@ export interface CalendarProps {
   showNeighboringMonth?: boolean
   minDate?: Date
   maxDate?: Date
+  /** Disables individual days, e.g. ones before a departure date. */
+  tileDisabled?: (date: Date) => boolean
 }
 
 function CalendarComponent({
@@ -25,6 +27,7 @@ function CalendarComponent({
   showNeighboringMonth = true,
   minDate,
   maxDate,
+  tileDisabled,
   ...props
 }: CalendarProps) {
   const handleChange = (newValue: Value) => {
@@ -45,7 +48,7 @@ function CalendarComponent({
         .react-calendar {
           width: 100%;
           max-width: 320px;
-          background: white;
+          background: var(--surface);
           border: none;
           font-family: inherit;
           line-height: 1.125em;
@@ -141,11 +144,15 @@ function CalendarComponent({
         }
         
         .react-calendar__navigation__prev-button:before {
-          background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23000'%3e%3cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M15 19l-7-7 7-7' /%3e%3c/svg%3e");
+          background-color: currentColor;
+          -webkit-mask: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23000'%3e%3cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M15 19l-7-7 7-7' /%3e%3c/svg%3e") center / contain no-repeat;
+          mask: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23000'%3e%3cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M15 19l-7-7 7-7' /%3e%3c/svg%3e") center / contain no-repeat;
         }
         
         .react-calendar__navigation__next-button:before {
-          background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23000'%3e%3cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M9 5l7 7-7 7' /%3e%3c/svg%3e");
+          background-color: currentColor;
+          -webkit-mask: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23000'%3e%3cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M9 5l7 7-7 7' /%3e%3c/svg%3e") center / contain no-repeat;
+          mask: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23000'%3e%3cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M9 5l7 7-7 7' /%3e%3c/svg%3e") center / contain no-repeat;
         }
         
         .react-calendar__month-view__weekdays {
@@ -221,7 +228,7 @@ function CalendarComponent({
         
         .react-calendar__tile--hasActive {
           background: var(--ink);
-          color: white;
+          color: var(--surface);
         }
         
         .react-calendar__tile--hasActive:enabled:hover,
@@ -231,7 +238,7 @@ function CalendarComponent({
         
         .react-calendar__tile--active {
           background: var(--ink);
-          color: white;
+          color: var(--surface);
         }
         
         .react-calendar__tile--active:enabled:hover,
@@ -262,6 +269,7 @@ function CalendarComponent({
         showNeighboringMonth={showNeighboringMonth}
         minDate={minDate}
         maxDate={maxDate}
+        tileDisabled={tileDisabled ? ({ date, view }) => view === "month" && tileDisabled(date) : undefined}
         {...props}
       />
     </div>

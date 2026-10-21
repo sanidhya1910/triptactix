@@ -1,8 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { AppShell } from '@/components/layout/AppShell';
 import { SiteFooter } from '@/components/layout/SiteFooter';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Stat } from '@/components/ui/stat';
 import { 
   Sparkle,
   MapPin,
@@ -39,7 +40,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { GeneratedItinerary } from '@/lib/perplexity-service';
 
 type PlannerErrors = Partial<Record<'destination' | 'startDate' | 'endDate' | 'source', string>>;
-import { saveTrip } from '@/lib/saved-trips';
+import { getTrip, saveTrip } from '@/lib/saved-trips';
+import { parseISODate } from '@/lib/dates';
 import { fromItinerary } from '@/lib/planner/from-itinerary';
 import { useTrip as usePlanner } from '@/lib/planner/store';
 import { tripHref } from '@/components/planner/BudgetList';
@@ -61,30 +63,32 @@ interface ItineraryFormData {
 }
 
 interface FlightInsight {
-  source: 'ml-model' | 'estimate';
+  /** ml-model: fares from the trained model. unavailable: the AI's own estimate is used. */
+  source: 'ml-model' | 'unavailable';
   travelClass?: string;
   outbound?: number;
   return?: number;
-  confidence?: number;
+  perPerson?: { outbound: number; return: number };
+  travelers?: number;
+  confidence?: number | null;
   reason?: string;
-  bookingAdvice?: {
-    action?: string;
-    recommendation?: string;
-    bestDays?: Array<{ date: string; price: number; day_of_week: string; days_until: number }>;
-  } | null;
 }
 
 interface ItineraryMeta {
-  realPricing?: {
-    flightPrices?: string;
-    hotelPrices?: string;
-  };
   flightInsight?: FlightInsight | null;
   generatedAt?: string;
-  source?: string;
-  fallbackReason?: string | null;
-  isFallback?: boolean;
+  /** Set when shown from My trips rather than freshly generated. */
+  savedAt?: string;
 }
+
+/** Why there is no itinerary to show, from the API's error code. */
+interface Failure {
+  code: 'ai_unavailable' | 'ai_busy' | 'ai_timeout' | 'ai_failed' | 'bad_request' | 'network' | 'not_found';
+  message: string;
+}
+
+/** How long to wait before giving up. The server stops the AI call at 50 seconds. */
+const GENERATE_TIMEOUT_MS = 70_000;
 
 type TravelerRules = {
   minTravelers: number;
@@ -107,7 +111,49 @@ const getGroupTravelerRules = (groupType: ItineraryFormData['groupType']): Trave
   }
 };
 
-export default function EnhancedItineraryPage() {
+export default function ItineraryPage() {
+  // useSearchParams needs a Suspense boundary for this page to stay statically rendered.
+  return (
+    <Suspense fallback={null}>
+      <EnhancedItineraryPage />
+    </Suspense>
+  );
+}
+
+/** Why an itinerary could not be built, said plainly, with the next useful step. */
+function FailureNotice({ failure }: { failure: Failure }) {
+  if (failure.code === 'ai_unavailable') {
+    return (
+      <div role="alert" className="mt-6 rounded-lg border border-line bg-surface-sunken p-5">
+        <p className="font-medium text-ink">AI itineraries aren’t connected yet</p>
+        <p className="mt-1 text-sm text-ink-secondary">
+          We won’t show a made-up plan in its place. You can still cost a trip day by day yourself.
+        </p>
+        <Button asChild variant="outline" size="sm" className="mt-4">
+          <Link href="/planner">Open the budget planner</Link>
+        </Button>
+      </div>
+    );
+  }
+  const retryable = failure.code !== 'bad_request' && failure.code !== 'not_found';
+  return (
+    <div role="alert" className="mt-6 rounded-lg border border-neg-fg/25 bg-neg p-5">
+      <p className="font-medium text-neg-fg">
+        {failure.code === 'not_found' ? 'That saved itinerary isn’t on this device' : 'The itinerary wasn’t built'}
+      </p>
+      <p className="mt-1 text-sm text-neg-fg">{failure.message}</p>
+      {retryable && (
+        <Button type="submit" variant="outline" size="sm" className="mt-4">
+          Try again
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function EnhancedItineraryPage() {
+  const searchParams = useSearchParams();
+  const savedId = searchParams.get('saved');
   const [errors, setErrors] = useState<PlannerErrors>({});
   const [isGenerating, setIsGenerating] = useState(false);
   const [hasItinerary, setHasItinerary] = useState(false);
@@ -117,6 +163,7 @@ export default function EnhancedItineraryPage() {
   const [savedTripId, setSavedTripId] = useState<string | null>(null);
   const [generatedItinerary, setGeneratedItinerary] = useState<GeneratedItinerary | null>(null);
   const [itineraryMeta, setItineraryMeta] = useState<ItineraryMeta | null>(null);
+  const [failure, setFailure] = useState<Failure | null>(null);
   const [sourceCity, setSourceCity] = useState<City | null>(null);
   const [destinationCity, setDestinationCity] = useState<City | null>(null);
   const [startDate, setStartDate] = useState<Date | undefined>(undefined);
@@ -143,6 +190,35 @@ export default function EnhancedItineraryPage() {
     current.setHours(0, 0, 0, 0);
     return current;
   }, []);
+
+  // /itinerary?saved=<id> shows an itinerary saved earlier, from My trips. "Open planner"
+  // there used to link to an empty form, so a saved itinerary could never be seen again.
+  useEffect(() => {
+    if (!savedId) return;
+    const saved = getTrip(savedId);
+    const snapshot = saved?.itinerary as GeneratedItinerary | undefined;
+    if (!saved || !snapshot || !Array.isArray(snapshot.days) || snapshot.days.length === 0) {
+      setFailure({ code: 'not_found', message: 'Saved trips live in this browser only, so it may have been removed or saved on another device. Plan a new one below.' });
+      return;
+    }
+    setGeneratedItinerary(snapshot);
+    setItineraryMeta({ savedAt: saved.savedAt });
+    setFormData((prev) => ({
+      ...prev,
+      destination: saved.destination,
+      startDate: saved.startDate,
+      endDate: saved.endDate,
+      travelers: saved.travelers,
+      budget: (['budget', 'mid-range', 'luxury'] as const).find((b) => b === saved.budget) ?? prev.budget,
+      flightSource: saved.flightSource ?? '',
+      includeFlight: Boolean(saved.flightSource),
+    }));
+    setStartDate(parseISODate(saved.startDate) ?? undefined);
+    setEndDate(parseISODate(saved.endDate) ?? undefined);
+    setSavedTripId(saved.id);
+    setIsSaved(true);
+    setHasItinerary(true);
+  }, [savedId]);
 
   const travelerRules = useMemo(() => getGroupTravelerRules(formData.groupType), [formData.groupType]);
 
@@ -188,19 +264,8 @@ export default function EnhancedItineraryPage() {
     return format(parsed, 'MMM dd, yyyy • HH:mm');
   }, [itineraryMeta?.generatedAt]);
 
-  const sourceLabel = useMemo(() => {
-    if (!itineraryMeta?.source) {
-      return null;
-    }
-    switch (itineraryMeta.source) {
-      case 'perplexity-ai':
-        return 'Perplexity AI';
-      case 'perplexity-fallback-template':
-        return 'Curated fallback template';
-      default:
-        return itineraryMeta.source;
-    }
-  }, [itineraryMeta?.source]);
+  // Every itinerary shown here is from the AI: there is no template fallback any more.
+  const sourceLabel = itineraryMeta?.savedAt ? 'Perplexity AI, saved on this device' : itineraryMeta ? 'Perplexity AI' : null;
 
   const handleInterestToggle = (interest: string) => {
     setFormData(prev => ({
@@ -229,21 +294,25 @@ export default function EnhancedItineraryPage() {
     if (!destinationCity) nextErrors.destination = 'Pick a destination from the list.';
     if (!startDate) nextErrors.startDate = 'Choose a start date.';
     if (!endDate) nextErrors.endDate = 'Choose an end date.';
+    if (startDate && endDate && endDate < startDate) nextErrors.endDate = 'The trip ends before it starts.';
     if (formData.includeFlight && !sourceCity) {
       nextErrors.source = 'Pick the city you are flying from.';
     }
 
     setErrors(nextErrors);
-    if (Object.keys(nextErrors).length > 0) {
-      toast.error('Some details are missing', {
-        description: 'Check the highlighted fields and try again.',
-      });
+    const firstError = (['destination', 'startDate', 'endDate', 'source'] as const).find((k) => nextErrors[k]);
+    if (firstError) {
+      // Take the user to the first problem rather than only announcing that there is one.
+      document.getElementById({ destination: 'itinerary-destination', startDate: 'trip-start', endDate: 'trip-end', source: 'itinerary-source' }[firstError])?.focus();
       return;
     }
-    
+
     setIsGenerating(true);
     setIsSaved(false);
     setSavedTripId(null);
+    setFailure(null);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), GENERATE_TIMEOUT_MS);
 
     try {
       const requestData = {
@@ -265,35 +334,30 @@ export default function EnhancedItineraryPage() {
       
       const response = await fetch('/api/itinerary/enhanced', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(requestData),
+        signal: controller.signal,
       });
-      
-      const result = await response.json();
-      
-      if (result.success) {
+      const result = await response.json().catch(() => null);
+
+      if (result?.success) {
         setGeneratedItinerary(result.data.itinerary);
-        setItineraryMeta({
-          realPricing: result.data.realPricing,
-          flightInsight: result.data.flightInsight ?? null,
-          generatedAt: result.data.generatedAt,
-          source: result.data.source,
-          fallbackReason: result.data.fallbackReason ?? result.data.itinerary?.fallbackReason ?? null,
-          isFallback: result.data.itinerary?.isFallback ?? false
-        });
+        setItineraryMeta({ flightInsight: result.data.flightInsight ?? null, generatedAt: result.data.generatedAt });
         setHasItinerary(true);
       } else {
-        throw new Error(result.error || 'Failed to generate itinerary');
+        setFailure({
+          code: result?.code ?? 'ai_failed',
+          message: result?.error ?? 'The planning service didn’t respond. Try again in a moment.',
+        });
       }
-      
     } catch (error) {
-      console.error('Error generating itinerary:', error);
-      toast.error("We couldn't build that itinerary", {
-        description: 'The planning service did not respond. Please try again.',
-      });
+      setFailure(
+        controller.signal.aborted
+          ? { code: 'ai_timeout', message: 'The AI took too long to answer. Try again, or plan fewer days.' }
+          : { code: 'network', message: 'We couldn’t reach the planning service. Check your connection and try again.' },
+      );
     } finally {
+      clearTimeout(timer);
       setIsGenerating(false);
     }
   };
@@ -373,7 +437,7 @@ export default function EnhancedItineraryPage() {
             <span className="sr-only">Generating your itinerary</span>
             <h1 className="text-display-sm text-ink">Building your itinerary</h1>
             <p className="mt-3 text-ink-secondary">
-              Pulling activities, stays and live flight prices for your dates.
+              Asking the AI for a day-by-day plan. This usually takes 20 to 40 seconds.
             </p>
 
             <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
@@ -414,9 +478,12 @@ export default function EnhancedItineraryPage() {
               <h1 className="text-display-sm text-ink">Plan a trip</h1>
               <p className="mt-3 text-ink-secondary">
                 Tell us where, when and how you like to travel. You get a day-by-day plan with
-                real flight prices and stays costed in.
+                every activity, meal and stay costed, ready to turn into a budget.
               </p>
             </header>
+
+            {/* Arriving from a stale link, the reason belongs above the form, not beside submit. */}
+            {failure?.code === 'not_found' && <FailureNotice failure={failure} />}
 
             <Card className="mt-10">
               <CardContent className="p-6 md:p-8">
@@ -445,8 +512,10 @@ export default function EnhancedItineraryPage() {
                     </div>
                     
                     <div>
-                      <label className="mb-2 block text-sm font-medium text-ink">Start date</label>
+                      <label htmlFor="trip-start" className="mb-2 block text-sm font-medium text-ink">Start date</label>
                       <DatePicker
+                        id="trip-start"
+                        invalid={Boolean(errors.startDate)}
                         date={startDate}
                         onDateChange={(d) => {
                           setStartDate(d);
@@ -462,8 +531,10 @@ export default function EnhancedItineraryPage() {
                     </div>
                     
                     <div>
-                      <label className="mb-2 block text-sm font-medium text-ink">End date</label>
+                      <label htmlFor="trip-end" className="mb-2 block text-sm font-medium text-ink">End date</label>
                       <DatePicker
+                        id="trip-end"
+                        invalid={Boolean(errors.endDate)}
                         date={endDate}
                         onDateChange={(d) => {
                           setEndDate(d);
@@ -524,7 +595,7 @@ export default function EnhancedItineraryPage() {
                                 <p role="alert" className="mt-2 text-xs font-medium text-neg-fg">{errors.source}</p>
                               ) : (
                                 <p className="mt-2 text-xs text-ink-tertiary">
-                                  Live flight prices get folded into the trip budget.
+                                  Flights between the six metros are priced by the fare model and added to the budget.
                                 </p>
                               )}
                             </div>
@@ -537,11 +608,12 @@ export default function EnhancedItineraryPage() {
                   {/* Travelers & Budget */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div>
-                      <label className="block text-sm font-semibold text-ink mb-3">
+                      <label htmlFor="trip-travellers" className="block text-sm font-semibold text-ink mb-3">
                         <Users className="w-4 h-4 inline mr-1" />
                         Travellers
                       </label>
                       <select 
+                        id="trip-travellers"
                         className="w-full h-12 px-4 border border-line-strong rounded-lg bg-surface text-ink focus:border-ink focus:outline-none focus:ring-2 focus:ring-ink/10 transition-colors"
                         value={formData.travelers}
                         disabled={travelerRules.isLocked}
@@ -560,17 +632,18 @@ export default function EnhancedItineraryPage() {
                     </div>
                     
                     <div>
-                      <label className="block text-sm font-semibold text-ink mb-3">
+                      <p id="trip-budget-label" className="block text-sm font-semibold text-ink mb-3">
                         <CurrencyInr className="w-4 h-4 inline mr-1" />
                         Budget
-                      </label>
-                      <div className="grid grid-cols-3 gap-2">
+                      </p>
+                      <div role="group" aria-labelledby="trip-budget-label" className="grid grid-cols-3 gap-2">
                         {(['budget', 'mid-range', 'luxury'] as const).map((budget) => {
                           const budgetInfo = getBudgetInfo(budget);
                           return (
                             <button
                               key={budget}
                               type="button"
+                              aria-pressed={formData.budget === budget}
                               onClick={() => setFormData(prev => ({ ...prev, budget }))}
                               className={`p-3 rounded-lg border text-xs font-medium transition-all ${
                                 formData.budget === budget
@@ -591,10 +664,11 @@ export default function EnhancedItineraryPage() {
                   {/* Travel Preferences */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div>
-                      <label className="block text-sm font-semibold text-ink mb-3">
+                      <label htmlFor="trip-group" className="block text-sm font-semibold text-ink mb-3">
                         Group type
                       </label>
                       <select 
+                        id="trip-group"
                         className="w-full h-12 px-4 border border-line-strong rounded-lg bg-surface focus:border-ink transition-colors"
                         value={formData.groupType}
                         onChange={(e) => {
@@ -619,10 +693,11 @@ export default function EnhancedItineraryPage() {
                     </div>
                     
                     <div>
-                      <label className="block text-sm font-semibold text-ink mb-3">
+                      <label htmlFor="trip-style" className="block text-sm font-semibold text-ink mb-3">
                         Travel style
                       </label>
                       <select 
+                        id="trip-style"
                         className="w-full h-12 px-4 border border-line-strong rounded-lg bg-surface focus:border-ink transition-colors"
                         value={formData.travelStyle}
                         onChange={(e) =>
@@ -641,10 +716,11 @@ export default function EnhancedItineraryPage() {
                     </div>
                     
                     <div>
-                      <label className="block text-sm font-semibold text-ink mb-3">
+                      <label htmlFor="trip-pace" className="block text-sm font-semibold text-ink mb-3">
                         Walking pace
                       </label>
                       <select 
+                        id="trip-pace"
                         className="w-full h-12 px-4 border border-line-strong rounded-lg bg-surface focus:border-ink transition-colors"
                         value={formData.fitnessLevel}
                         onChange={(e) =>
@@ -663,15 +739,16 @@ export default function EnhancedItineraryPage() {
 
                   {/* Interests */}
                   <div>
-                    <label className="block text-sm font-semibold text-ink mb-4">
+                    <p id="trip-interests-label" className="block text-sm font-semibold text-ink mb-4">
                       <Fire className="w-4 h-4 inline mr-1" />
                       Interests
-                    </label>
-                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                    </p>
+                    <div role="group" aria-labelledby="trip-interests-label" className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
                       {interests.map((interest) => (
                         <button
                           key={interest}
                           type="button"
+                          aria-pressed={formData.interests.includes(interest)}
                           onClick={() => handleInterestToggle(interest)}
                           className={`p-3 rounded-lg border text-xs font-medium transition-all ${
                             formData.interests.includes(interest)
@@ -687,14 +764,15 @@ export default function EnhancedItineraryPage() {
 
                   {/* Dietary Restrictions */}
                   <div>
-                    <label className="block text-sm font-semibold text-ink mb-4">
+                    <p id="trip-diet-label" className="block text-sm font-semibold text-ink mb-4">
                       Dietary preferences
-                    </label>
-                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+                    </p>
+                    <div role="group" aria-labelledby="trip-diet-label" className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
                       {dietaryOptions.map((dietary) => (
                         <button
                           key={dietary}
                           type="button"
+                          aria-pressed={formData.dietaryRestrictions.includes(dietary)}
                           onClick={() => handleDietaryToggle(dietary)}
                           className={`p-3 rounded-lg border text-xs font-medium transition-all ${
                             formData.dietaryRestrictions.includes(dietary)
@@ -710,12 +788,14 @@ export default function EnhancedItineraryPage() {
 
                   {/* Generate Button */}
                   <div className="pt-4">
-                    <Button type="submit" size="lg" disabled={!destinationCity}>
+                    {/* Always enabled: a disabled button never explains itself, the validation does. */}
+                    <Button type="submit" size="lg">
                       Build the itinerary
                     </Button>
                     <p className="mt-3 text-xs text-ink-tertiary">
-                      Flight and hotel prices come from live search at the time you generate.
+                      Costs are the AI’s estimates. Flights between the six metros come from the fare model when it is connected.
                     </p>
+                    {failure && failure.code !== 'not_found' && <FailureNotice failure={failure} />}
                   </div>
                 </form>
               </CardContent>
@@ -726,7 +806,7 @@ export default function EnhancedItineraryPage() {
             {/* Header */}
             <div className="mb-10 flex flex-col justify-between gap-6 md:flex-row md:items-end">
               <div>
-                <h1 className="text-display-sm text-ink">{destinationCity?.name}</h1>
+                <h1 className="text-display-sm text-ink">{generatedItinerary?.destination || destinationCity?.name || formData.destination}</h1>
                 <p className="mt-2 text-ink-secondary [font-variant-numeric:tabular-nums]">
                   {startDate && endDate
                     ? `${format(startDate, 'd MMM')} to ${format(endDate, 'd MMM')}`
@@ -796,209 +876,139 @@ export default function EnhancedItineraryPage() {
               </div>
             </div>
 
-            {(generatedItinerary?.isFallback || itineraryMeta?.isFallback) && (
-              <div className="mb-8 flex items-start gap-3 rounded-lg border border-caution-fg/25 bg-caution p-4">
-                <Warning className="w-6 h-6 text-caution-fg mt-0.5" />
-                <div>
-                  <p className="text-sm font-semibold text-caution-fg">
-                    Showing curated backup itinerary
-                  </p>
-                  <p className="text-sm text-caution-fg mt-1">
-                    {generatedItinerary?.fallbackReason || itineraryMeta?.fallbackReason || 'Perplexity took too long to respond, so we generated a smart template to keep you moving.'}
-                  </p>
-                </div>
-              </div>
-            )}
-
             {generatedItinerary && (
               <>
-                {/* Trip Summary Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                  <Card className="bg-surface border border-line">
-                    <CardContent className="p-6 text-center">
-                      <CalendarBlank className="w-8 h-8 text-ink mx-auto mb-3" />
-                      <p className="text-sm text-ink-secondary font-medium">Duration</p>
-                      <p className="text-2xl font-bold text-ink">
-                        {itineraryDuration || 0} Days
-                      </p>
-                    </CardContent>
-                  </Card>
-                  
-                  <Card className="bg-surface border border-line">
-                    <CardContent className="p-6 text-center">
-                      <MapPin className="w-8 h-8 text-ink mx-auto mb-3" />
-                      <p className="text-sm text-ink-secondary font-medium">Activities</p>
-                      <p className="text-2xl font-bold text-ink">
-                        {generatedItinerary.days?.reduce<number>((acc, day) => acc + day.activities.length, 0) ?? 0}
-                      </p>
-                    </CardContent>
-                  </Card>
-                  
-                  <Card className="bg-surface border border-line">
-                    <CardContent className="p-6 text-center">
-                      <CurrencyInr className="w-8 h-8 text-ink mx-auto mb-3" />
-                      <p className="text-sm text-ink-secondary font-medium">Total Budget</p>
-                      <p className="text-2xl font-bold text-ink">
-                        {generatedItinerary.budgetBreakdown?.total ? 
-                          formatCurrency(generatedItinerary.budgetBreakdown.total) : 
-                          'N/A'
-                        }
-                      </p>
-                    </CardContent>
-                  </Card>
-                  
-                  <Card className="bg-surface border border-line">
-                    <CardContent className="p-6 text-center">
-                      <Star className="w-8 h-8 text-ink mx-auto mb-3" />
-                      <p className="text-sm text-ink-secondary font-medium">AI Score</p>
-                      <p className="text-2xl font-bold text-ink">95%</p>
-                    </CardContent>
-                  </Card>
+                {/* Summary. Every figure is the AI's estimate, and says so. */}
+                <div className="mb-8 grid grid-cols-2 gap-x-8 gap-y-8 border-y border-line py-8 md:grid-cols-4 md:divide-x md:divide-line">
+                  <Stat value={String(generatedItinerary.days?.length || itineraryDuration || 0)} label={(generatedItinerary.days?.length ?? 0) === 1 ? 'Day' : 'Days'} className="md:pr-8" />
+                  <Stat
+                    value={String(generatedItinerary.days?.reduce<number>((acc, day) => acc + day.activities.length, 0) ?? 0)}
+                    label="Activities"
+                    className="md:px-8"
+                  />
+                  <Stat
+                    value={generatedItinerary.budgetBreakdown?.total ? formatCurrency(generatedItinerary.budgetBreakdown.total) : '—'}
+                    label="Estimated total"
+                    detail={`for ${formData.travelers} ${formData.travelers === 1 ? 'traveller' : 'travellers'}`}
+                    className="md:px-8"
+                  />
+                  <Stat
+                    value={
+                      generatedItinerary.budgetBreakdown?.total
+                        ? formatCurrency(Math.round(generatedItinerary.budgetBreakdown.total / Math.max(1, formData.travelers)))
+                        : '—'
+                    }
+                    label="Per person"
+                    className="md:pl-8"
+                  />
                 </div>
 
-                {/* Pricing Breakdown */}
                 {generatedItinerary.budgetBreakdown && (
-                  <Card className="mb-8 border border-line bg-surface-sunken">
+                  <Card className="mb-8">
                     <CardHeader>
-                      <CardTitle className="flex items-center text-xl">
-                        <CurrencyInr className="w-6 h-6 mr-2 text-ink" />
-                        Real-Time Pricing Breakdown
+                      <CardTitle as="h2" className="flex items-center text-xl">
+                        <CurrencyInr className="mr-2 h-6 w-6 text-ink" />
+                        Estimated costs
                       </CardTitle>
+                      <p className="text-sm text-ink-secondary">
+                        These are the AI’s estimates, not quotes. Turn this into a budget to adjust them as you book.
+                      </p>
                     </CardHeader>
                     <CardContent>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        {formData.includeFlight && generatedItinerary.budgetBreakdown.flights && (
-                          <div className="text-center">
-                            <div className="bg-surface p-4 rounded-lg border border-line">
-                              <AirplaneTilt className="w-8 h-8 text-ink mx-auto mb-2" />
-                              <p className="text-sm font-medium text-ink">Flight Cost</p>
-                              <p className="text-2xl font-bold text-ink">
-                                {formatCurrency(generatedItinerary.budgetBreakdown.flights)}
-                              </p>
-                              <p className="text-xs text-ink-secondary mt-1">
-                                {sourceCity?.name} to {destinationCity?.name}
-                              </p>
+                      <dl className="grid grid-cols-2 gap-x-6 gap-y-5 md:grid-cols-3">
+                        {(
+                          [
+                            [
+                              'Flights',
+                              generatedItinerary.budgetBreakdown.flights,
+                              itineraryMeta?.flightInsight?.source === 'ml-model' ? 'From the fare model' : 'AI estimate',
+                            ],
+                            [
+                              'Stay',
+                              generatedItinerary.budgetBreakdown.accommodation,
+                              `${Math.max(0, (generatedItinerary.days?.length ?? 1) - 1)} ${(generatedItinerary.days?.length ?? 1) - 1 === 1 ? 'night' : 'nights'}`,
+                            ],
+                            ['Activities', generatedItinerary.budgetBreakdown.activities, undefined],
+                            ['Food', generatedItinerary.budgetBreakdown.food, undefined],
+                            ['Local transport', generatedItinerary.budgetBreakdown.transportation, undefined],
+                            ['Other', generatedItinerary.budgetBreakdown.miscellaneous, undefined],
+                          ] as Array<[string, number | undefined, string | undefined]>
+                        )
+                          .filter(([, amount]) => typeof amount === 'number' && amount > 0)
+                          .map(([label, amount, note]) => (
+                            <div key={label}>
+                              <dt className="text-xs text-ink-tertiary">{label}</dt>
+                              <dd className="mt-1 font-mono text-lg text-ink [font-variant-numeric:tabular-nums]">{formatCurrency(amount!)}</dd>
+                              {note && <dd className="text-xs text-ink-tertiary">{note}</dd>}
                             </div>
-                          </div>
-                        )}
-                        
-                        {generatedItinerary.budgetBreakdown.accommodation && (
-                          <div className="text-center">
-                            <div className="bg-surface p-4 rounded-lg border border-line">
-                              <Buildings className="w-8 h-8 text-ink mx-auto mb-2" />
-                              <p className="text-sm font-medium text-ink">Hotel Cost</p>
-                              <p className="text-2xl font-bold text-ink">
-                                {formatCurrency(generatedItinerary.budgetBreakdown.accommodation)}
-                              </p>
-                              <p className="text-xs text-ink-secondary mt-1">Total stay</p>
-                            </div>
-                          </div>
-                        )}
-                        
-                        <div className="text-center">
-                          <div className="bg-surface p-4 rounded-lg border border-line">
-                            <Heart className="w-8 h-8 text-ink mx-auto mb-2" />
-                            <p className="text-sm font-medium text-ink">Activities & Food</p>
-                            <p className="text-2xl font-bold text-ink">
-                              {formatCurrency(
-                                (generatedItinerary.budgetBreakdown.activities || 0) + 
-                                (generatedItinerary.budgetBreakdown.food || 0)
-                              )}
-                            </p>
-                            <p className="text-xs text-ink-secondary mt-1">Estimated total</p>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div className="mt-6 p-4 bg-ink text-surface rounded-lg text-center space-y-1">
-                        <p className="text-sm font-medium">
-                          {itineraryMeta?.realPricing?.hotelPrices || 'Hotel pricing generated with Perplexity heuristics'}
+                          ))}
+                      </dl>
+                      {(generatedAtLabel || sourceLabel) && (
+                        <p className="mt-6 border-t border-line pt-4 text-xs text-ink-tertiary">
+                          {sourceLabel}
+                          {generatedAtLabel && ` · generated ${generatedAtLabel}`}
                         </p>
-                        {itineraryMeta?.realPricing?.flightPrices && (
-                          <p className="text-xs text-surface/70">
-                            Flights: {itineraryMeta.realPricing.flightPrices}
-                          </p>
-                        )}
-                        {generatedAtLabel && (
-                          <p className="text-xs text-surface/70">
-                            Generated {generatedAtLabel}
-                          </p>
-                        )}
-                        {sourceLabel && (
-                          <p className="text-xs uppercase tracking-wide text-ink-tertiary">
-                            Source: {sourceLabel}
-                          </p>
-                        )}
-                      </div>
+                      )}
                     </CardContent>
                   </Card>
                 )}
 
-                {/* ML Flight Price Intelligence */}
+                {itineraryMeta?.flightInsight?.source === 'unavailable' && itineraryMeta.flightInsight.reason && (
+                  <p className="mb-8 flex gap-2 rounded-lg border border-line bg-surface-sunken p-4 text-sm text-ink-secondary">
+                    <AirplaneTilt aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-ink-tertiary" />
+                    {itineraryMeta.flightInsight.reason}
+                  </p>
+                )}
+
                 {itineraryMeta?.flightInsight?.source === 'ml-model' && (
-                  <Card className="mb-8 border border-ink bg-surface">
-                    <CardHeader className="bg-ink text-surface rounded-t-md">
-                      <CardTitle className="flex items-center text-xl">
-                        <Sparkle className="w-6 h-6 mr-2" />
-                        Flight Price Intelligence
-                        <span className="ml-3 text-xs font-normal bg-surface/20 px-2 py-0.5 rounded-full">
-                          ML model · {itineraryMeta.flightInsight.confidence}% confidence
-                        </span>
+                  <Card className="mb-8">
+                    <CardHeader>
+                      <CardTitle as="h2" className="flex flex-wrap items-center gap-3 text-xl">
+                        <AirplaneTilt className="h-6 w-6 text-ink" />
+                        Forecast flight fares
+                        {typeof itineraryMeta.flightInsight.confidence === 'number' && (
+                          <Badge variant="info">{itineraryMeta.flightInsight.confidence}% model confidence</Badge>
+                        )}
                       </CardTitle>
+                      <p className="text-sm text-ink-secondary">
+                        From the fare model, {itineraryMeta.flightInsight.travelClass} class, for {itineraryMeta.flightInsight.travelers ?? formData.travelers}{' '}
+                        {(itineraryMeta.flightInsight.travelers ?? formData.travelers) === 1 ? 'traveller' : 'travellers'}.
+                      </p>
                     </CardHeader>
-                    <CardContent className="p-6 space-y-5">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="p-4 rounded-lg border border-line bg-surface-sunken text-center">
-                          <p className="text-xs text-ink-tertiary uppercase tracking-wide">Predicted Outbound</p>
-                          <p className="text-2xl font-bold text-ink mt-1">
-                            {formatCurrency(itineraryMeta.flightInsight.outbound || 0)}
-                          </p>
-                          <p className="text-xs text-ink-secondary mt-1">{sourceCity?.name} to {destinationCity?.name}</p>
-                        </div>
-                        <div className="p-4 rounded-lg border border-line bg-surface-sunken text-center">
-                          <p className="text-xs text-ink-tertiary uppercase tracking-wide">Predicted Return</p>
-                          <p className="text-2xl font-bold text-ink mt-1">
-                            {formatCurrency(itineraryMeta.flightInsight.return || 0)}
-                          </p>
-                          <p className="text-xs text-ink-secondary mt-1">{destinationCity?.name} to {sourceCity?.name}</p>
-                        </div>
-                        <div className="p-4 rounded-lg border border-line bg-surface-sunken text-center">
-                          <p className="text-xs text-ink-tertiary uppercase tracking-wide">Class</p>
-                          <p className="text-2xl font-bold text-ink mt-1 capitalize">
-                            {itineraryMeta.flightInsight.travelClass}
-                          </p>
-                          <p className="text-xs text-ink-secondary mt-1">Based on your budget tier</p>
-                        </div>
-                      </div>
-
-                      {itineraryMeta.flightInsight.bookingAdvice?.recommendation && (
-                        <div className="p-4 rounded-lg bg-pos border border-pos-fg/25">
-                          <p className="text-sm font-semibold text-pos-fg capitalize">
-                            {itineraryMeta.flightInsight.bookingAdvice.action?.replace(/_/g, ' ') || 'When to book'}
-                          </p>
-                          <p className="text-sm text-pos-fg mt-1">
-                            {itineraryMeta.flightInsight.bookingAdvice.recommendation}
-                          </p>
-                          {!!itineraryMeta.flightInsight.bookingAdvice.bestDays?.length && (
-                            <div className="flex flex-wrap gap-2 mt-3">
-                              {itineraryMeta.flightInsight.bookingAdvice.bestDays.map((d, i) => (
-                                <span key={i} className="px-2 py-1 bg-surface border border-pos-fg/25 rounded-full text-xs text-pos-fg">
-                                  {d.day_of_week} ({d.days_until}d), {formatCurrency(d.price)}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs text-ink-tertiary">
-                          Predicted by the gradient-boosting model trained on 600K+ flight records.
-                        </p>
+                    <CardContent className="space-y-5">
+                      <dl className="grid gap-4 sm:grid-cols-2">
+                        {(
+                          [
+                            ['Outbound', sourceCity?.name, destinationCity?.name, itineraryMeta.flightInsight.outbound, itineraryMeta.flightInsight.perPerson?.outbound],
+                            ['Return', destinationCity?.name, sourceCity?.name, itineraryMeta.flightInsight.return, itineraryMeta.flightInsight.perPerson?.return],
+                          ] as const
+                        ).map(([label, from, to, total, each]) => (
+                          <div key={label} className="rounded-lg border border-line bg-surface-sunken p-4">
+                            <dt className="text-xs text-ink-tertiary">
+                              {label}, {from} to {to}
+                            </dt>
+                            <dd className="mt-1 font-mono text-2xl text-ink [font-variant-numeric:tabular-nums]">{formatCurrency(total || 0)}</dd>
+                            {each !== undefined && (
+                              <dd className="text-xs text-ink-tertiary">{formatCurrency(each)} per person</dd>
+                            )}
+                          </div>
+                        ))}
+                      </dl>
+                      {sourceCity && destinationCity && (
                         <Button asChild variant="outline" size="sm">
-                          <Link href="/search">Search and book these flights</Link>
+                          <Link
+                            href={`/search?${new URLSearchParams({
+                              from: sourceCity.name,
+                              to: destinationCity.name,
+                              ...(formData.startDate ? { date: formData.startDate } : {}),
+                              ...(formData.endDate && formData.endDate !== formData.startDate ? { return: formData.endDate } : {}),
+                              adults: String(formData.travelers),
+                            })}`}
+                          >
+                            Compare live fares for these dates
+                          </Link>
                         </Button>
-                      </div>
+                      )}
                     </CardContent>
                   </Card>
                 )}

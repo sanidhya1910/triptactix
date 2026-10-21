@@ -1,54 +1,80 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { mlService } from '@/lib/ml-service';
-import { callMLAPI } from '@/lib/resilient-fetch';
+import { canonicalCity } from '@/lib/cities';
+import { isISODate } from '@/lib/dates';
+import { historicalRange } from '@/lib/ml-service';
+import { callMLAPI, isModelConfigured } from '@/lib/resilient-fetch';
 
 export const dynamic = 'force-dynamic';
-export const runtime = 'nodejs';
 
+interface ModelResponse {
+  success?: boolean;
+  predicted_price?: number;
+  confidence?: number;
+  price_range?: { min?: number; max?: number };
+}
+
+/**
+ * A fare forecast from the trained model behind ML_API_URL.
+ *
+ * Without the model this answers 503 "model_unavailable" and still includes the route's
+ * real historical range, so the page can show context without presenting it as a
+ * forecast. It used to fall back to a statistical guess (or a flat ₹8,000) labelled as
+ * a prediction.
+ */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const from = searchParams.get('from');
-  const to = searchParams.get('to');
-  const departureDate = searchParams.get('departureDate');
-  const airline = searchParams.get('airline');
+  const from = searchParams.get('from')?.trim();
+  const to = searchParams.get('to')?.trim();
+  const departureDate = searchParams.get('departureDate') ?? '';
+  const airline = searchParams.get('airline') ?? undefined;
+  const travelClass = searchParams.get('travelClass') ?? 'economy';
 
-  if (!from || !to || !departureDate) {
+  if (!from || !to || !isISODate(departureDate)) {
     return NextResponse.json(
-      { error: 'Missing required parameters: from, to, departureDate' },
-      { status: 400 }
+      { error: 'Required: from, to, and departureDate as yyyy-mm-dd.', code: 'bad_request' },
+      { status: 400 },
+    );
+  }
+  if (canonicalCity(from).toLowerCase() === canonicalCity(to).toLowerCase()) {
+    return NextResponse.json({ error: 'Choose two different cities.', code: 'same_city' }, { status: 400 });
+  }
+
+  const historical = historicalRange(from, to, { departureDate, airline, travelClass });
+
+  if (!isModelConfigured()) {
+    return NextResponse.json(
+      { error: 'The fare prediction model isn’t connected.', code: 'model_unavailable', historical },
+      { status: 503 },
     );
   }
 
-  try {
-    // Statistical service gives historical context (avg/min/max) and a fallback.
-    const prediction = await mlService.predictPrice(from, to, departureDate, airline || undefined);
-
-    // Prefer the trained Python gradient-boosting model for the headline number,
-    // so the dashboard agrees with the search page. Falls back to the statistical
-    // prediction if the ML API is unavailable.
-    const ml = await callMLAPI<any>('/predict', {
+  const ml = await callMLAPI<ModelResponse>(
+    '/predict',
+    {
       airline: airline || 'IndiGo',
-      source_city: from,
-      destination_city: to,
+      source_city: canonicalCity(from),
+      destination_city: canonicalCity(to),
       departure_date: departureDate,
-      departure_time: '10:00',
-      total_stops: 0,
-      travel_class: 'economy',
-    }, { maxRetries: 1, timeout: 3500 });
+      travel_class: travelClass,
+    },
+    { maxRetries: 1, timeout: 6000 },
+  );
 
-    const usedModel = ml?.success && typeof ml.predicted_price === 'number';
-
-    return NextResponse.json({
-      ...prediction,
-      predictedPrice: usedModel ? ml.predicted_price : prediction.predictedPrice,
-      confidence: usedModel ? (ml.confidence ?? prediction.confidence) : prediction.confidence,
-      modelSource: usedModel ? 'gradient-boosting' : 'statistical',
-    });
-  } catch (error) {
-    console.error('ML prediction error:', error);
+  if (!ml?.success || typeof ml.predicted_price !== 'number') {
     return NextResponse.json(
-      { error: 'Failed to generate price prediction' },
-      { status: 500 }
+      { error: 'The fare prediction model didn’t respond.', code: 'model_unavailable', historical },
+      { status: 503 },
     );
   }
+
+  const lo = ml.price_range?.min;
+  const hi = ml.price_range?.max;
+  return NextResponse.json({
+    source: 'model',
+    predictedPrice: ml.predicted_price,
+    confidence: typeof ml.confidence === 'number' ? ml.confidence : null,
+    // The model's 10th and 90th percentile estimates: 8 in 10 fares should fall inside.
+    interval: typeof lo === 'number' && typeof hi === 'number' ? { low: lo, high: hi } : null,
+    historical,
+  });
 }

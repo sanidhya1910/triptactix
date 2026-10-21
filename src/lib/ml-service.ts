@@ -1,36 +1,99 @@
-import fs from 'fs';
-import path from 'path';
 import { canonicalCity } from '@/lib/cities';
+import { daysBetween, todayISO } from '@/lib/dates';
+import stats from '@/lib/ml/route-stats.json';
 
+/**
+ * Historical fare statistics for Indian domestic routes, from the 300,153 bookings in
+ * data/Indian Airlines.csv, precomputed by scripts/build-route-stats.mjs.
+ *
+ * Everything here describes what fares *were*. Nothing predicts: forecasts come only
+ * from the trained model behind ML_API_URL. This used to read the CSV with fs at import,
+ * which never worked on Workers, and returned an invented ₹8,000 "prediction" for any
+ * route without data. Both are gone; unknown routes now say so.
+ */
 
-interface HistoricalFlightData {
-  airline: string;
-  flight: string;
-  source_city: string;
-  departure_time: string;
-  stops: string;
-  arrival_time: string;
-  destination_city: string;
+interface Cell {
+  count: number;
+  sum: number;
+  min: number;
+  max: number;
+}
+
+interface RouteStats {
+  from: string;
+  to: string;
   class: string;
-  duration: string;
-  days_left: number;
-  price: number;
+  all: Cell;
+  durationSum: number;
+  durationCount: number;
+  byAirline: Record<string, Cell>;
+  bySlot: Record<string, Cell>;
+  byWindow: Record<string, Cell>;
+  byDecade: Record<string, Cell>;
 }
 
-interface PricePrediction {
-  predictedPrice: number;
-  confidence: number;
-  trendDirection: 'up' | 'down' | 'stable';
-  recommendation: string;
-  historicalData: {
-    averagePrice: number;
-    minPrice: number;
-    maxPrice: number;
-    priceRange: number;
-  };
+interface StatsFile {
+  rows: number;
+  airlines: Record<string, number>;
+  routes: RouteStats[];
 }
 
-interface RouteAnalytics {
+const data = stats as unknown as StatsFile;
+
+/** Number of bookings the statistics are drawn from. */
+export const HISTORICAL_ROWS = data.rows;
+
+const avg = (c: Cell) => Math.round(c.sum / c.count);
+
+const AIRLINE_NAMES: Record<string, string> = {
+  Indigo: 'IndiGo',
+  Air_India: 'Air India',
+  SpiceJet: 'SpiceJet',
+  AirAsia: 'AirAsia',
+  Vistara: 'Vistara',
+  GO_FIRST: 'Go First',
+};
+const airlineName = (raw: string) => AIRLINE_NAMES[raw] ?? raw;
+const airlineKey = (name: string) =>
+  Object.keys(AIRLINE_NAMES).find((k) => k.toLowerCase() === name.toLowerCase() || AIRLINE_NAMES[k].toLowerCase() === name.toLowerCase());
+
+const SLOT_NAMES: Record<string, string> = {
+  Early_Morning: 'Early morning (6:00 to 9:00)',
+  Morning: 'Morning (9:00 to 12:00)',
+  Afternoon: 'Afternoon (12:00 to 15:00)',
+  Evening: 'Evening (15:00 to 18:00)',
+  Night: 'Night (18:00 to 21:00)',
+  Late_Night: 'Late night (21:00 to 6:00)',
+};
+const slotName = (raw: string) => SLOT_NAMES[raw] ?? raw;
+
+const WINDOW_ORDER = ['0-7 days', '8-21 days', '22-45 days', '46-60 days', '60+ days'];
+const windowOf = (daysLeft: number) =>
+  daysLeft <= 7 ? '0-7 days' : daysLeft <= 21 ? '8-21 days' : daysLeft <= 45 ? '22-45 days' : daysLeft <= 60 ? '46-60 days' : '60+ days';
+
+const index = new Map(data.routes.map((r) => [`${canonicalCity(r.from)}|${canonicalCity(r.to)}|${r.class}`, r]));
+
+function routeStats(from: string, to: string, travelClass = 'economy'): RouteStats | undefined {
+  const cls = travelClass.toLowerCase() === 'business' || travelClass.toLowerCase() === 'first' ? 'business' : 'economy';
+  return index.get(`${canonicalCity(from)}|${canonicalCity(to)}|${cls}`);
+}
+
+export const routeLabel = (from: string, to: string) => `${canonicalCity(from)} → ${canonicalCity(to)}`;
+
+// ---- Public types -------------------------------------------------------------
+
+export interface HistoricalRange {
+  route: string;
+  travelClass: string;
+  bookings: number;
+  averagePrice: number;
+  minPrice: number;
+  maxPrice: number;
+  /** Average for bookings made this many days ahead, when the date is known. */
+  window?: { label: string; averagePrice: number; bookings: number };
+}
+
+export interface RouteAnalytics {
   route: string;
   totalFlights: number;
   airlines: string[];
@@ -43,7 +106,7 @@ interface RouteAnalytics {
   popularTimeSlots: string[];
 }
 
-interface RouteIntelligence {
+export interface RouteIntelligence {
   route: string;
   totalFlights: number;
   airlinePositioning: Array<{ airline: string; avgPrice: number; minPrice: number; count: number }>;
@@ -54,638 +117,199 @@ interface RouteIntelligence {
   cheapestBookingWindow: string;
 }
 
-class MLService {
-  private historicalData: HistoricalFlightData[] = [];
-  private isDataLoaded = false;
-
-  constructor() {
-    this.loadHistoricalData();
-  }
-
-  private loadHistoricalData() {
-    try {
-      const csvPath = path.join(process.cwd(), 'data', 'Indian Airlines.csv');
-      if (!fs.existsSync(csvPath)) {
-        console.warn('Historical data CSV not found');
-        return;
-      }
-
-      const csvContent = fs.readFileSync(csvPath, 'utf-8');
-      const lines = csvContent.split('\n');
-      const headers = lines[0].split(',');
-
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
-
-        const values = line.split(',');
-        if (values.length >= 11) {
-          this.historicalData.push({
-            airline: values[1] || '',
-            flight: values[2] || '',
-            source_city: values[3] || '',
-            departure_time: values[4] || '',
-            stops: values[5] || '',
-            arrival_time: values[6] || '',
-            destination_city: values[7] || '',
-            class: values[8] || '',
-            duration: values[9] || '',
-            days_left: parseInt(values[10]) || 0,
-            price: parseInt(values[11]) || 0
-          });
-        }
-      }
-
-      this.isDataLoaded = true;
-      console.log(`Loaded ${this.historicalData.length} historical flight records`);
-    } catch (error) {
-      console.error('Error loading historical data:', error);
-    }
-  }
-
-  /**
-   * Predict flight price based on historical data
-   */
-  public async predictPrice(
-    from: string,
-    to: string,
-    departureDate: string,
-    airline?: string
-  ): Promise<PricePrediction> {
-    if (!this.isDataLoaded) {
-      throw new Error('Historical data not loaded');
-    }
-
-    console.log(`ML: Searching for route ${from} (${this.normalizeCity(from)}) → ${to} (${this.normalizeCity(to)})`);
-
-    // Filter historical data for the specific route
-    const routeData = this.historicalData.filter(flight => 
-      this.normalizeCity(flight.source_city) === this.normalizeCity(from) &&
-      this.normalizeCity(flight.destination_city) === this.normalizeCity(to) &&
-      (!airline || this.normalizeAirline(flight.airline) === this.normalizeAirline(airline)) &&
-      (flight.class?.toLowerCase?.() === 'economy')
-    );
-
-    console.log(`ML: Found ${routeData.length} historical flights for this route`);
-    if (routeData.length > 0) {
-      console.log(`ML: Sample flight:`, routeData[0]);
-    }
-
-    if (routeData.length === 0) {
-      return {
-        predictedPrice: 8000,
-        confidence: 0.3,
-        trendDirection: 'stable',
-        recommendation: 'No historical data available for this route',
-        historicalData: {
-          averagePrice: 8000,
-          minPrice: 8000,
-          maxPrice: 8000,
-          priceRange: 0
-        }
-      };
-    }
-
-    // Calculate price statistics
-    const prices = routeData.map(f => f.price);
-    const averagePrice = prices.reduce((sum, price) => sum + price, 0) / prices.length;
-    const minPrice = Math.min(...prices);
-    const maxPrice = Math.max(...prices);
-    const priceRange = maxPrice - minPrice;
-
-    // Calculate days left impact
-    const currentDate = new Date(departureDate);
-    const today = new Date();
-    const daysUntilDeparture = Math.max(0, Math.ceil((currentDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)));
-
-    // Price prediction based on days left
-    let priceFactor = 1.0;
-    if (daysUntilDeparture <= 7) {
-      priceFactor = 1.3; // Last minute premium
-    } else if (daysUntilDeparture <= 21) {
-      priceFactor = 1.1; // Moderate increase
-    } else if (daysUntilDeparture >= 60) {
-      priceFactor = 0.85; // Early bird discount
-    }
-
-    const predictedPrice = Math.round(averagePrice * priceFactor);
-
-    // Determine trend direction
-    const recentPrices = routeData
-      .filter(f => f.days_left <= 30)
-      .map(f => f.price);
-    
-    const earlyPrices = routeData
-      .filter(f => f.days_left > 30)
-      .map(f => f.price);
-
-    let trendDirection: 'up' | 'down' | 'stable' = 'stable';
-    if (recentPrices.length > 0 && earlyPrices.length > 0) {
-      const recentAvg = recentPrices.reduce((sum, p) => sum + p, 0) / recentPrices.length;
-      const earlyAvg = earlyPrices.reduce((sum, p) => sum + p, 0) / earlyPrices.length;
-      
-      if (recentAvg > earlyAvg * 1.1) {
-        trendDirection = 'up';
-      } else if (recentAvg < earlyAvg * 0.9) {
-        trendDirection = 'down';
-      }
-    }
-
-    // Generate recommendation
-    let recommendation = '';
-    if (daysUntilDeparture <= 7) {
-      recommendation = 'Book now - prices tend to be highest close to departure';
-    } else if (daysUntilDeparture <= 21) {
-      recommendation = 'Consider booking soon - prices may increase closer to departure';
-    } else if (daysUntilDeparture >= 60) {
-      recommendation = 'Great timing - early bookings often get the best prices';
-    } else {
-      recommendation = 'Good time to book - prices are relatively stable';
-    }
-
-    const confidence = Math.min(0.9, routeData.length / 1000); // Higher confidence with more data
-
-    return {
-      predictedPrice,
-      confidence,
-      trendDirection,
-      recommendation,
-      historicalData: {
-        averagePrice: Math.round(averagePrice),
-        minPrice,
-        maxPrice,
-        priceRange
-      }
-    };
-  }
-
-  /**
-   * Get comprehensive route analytics
-   */
-  public async getRouteAnalytics(from: string, to: string): Promise<RouteAnalytics> {
-    if (!this.isDataLoaded) {
-      throw new Error('Historical data not loaded');
-    }
-
-    const routeData = this.historicalData.filter(flight => 
-      this.normalizeCity(flight.source_city) === this.normalizeCity(from) &&
-      this.normalizeCity(flight.destination_city) === this.normalizeCity(to) &&
-      (flight.class?.toLowerCase?.() === 'economy')
-    );
-
-    if (routeData.length === 0) {
-      return {
-        route: `${canonicalCity(from)} → ${canonicalCity(to)}`,
-        totalFlights: 0,
-        airlines: [],
-        averagePrice: 0,
-        minPrice: 0,
-        maxPrice: 0,
-        averageDuration: 0,
-        mostCommonAirline: '',
-        bestTimeToBook: '',
-        popularTimeSlots: []
-      };
-    }
-
-    // Calculate statistics
-    const prices = routeData.map(f => f.price);
-    const averagePrice = prices.reduce((sum, price) => sum + price, 0) / prices.length;
-    const minPrice = Math.min(...prices);
-    const maxPrice = Math.max(...prices);
-
-    // Get unique airlines
-    const airlines = [...new Set(routeData.map(f => f.airline))];
-
-    // Find most common airline
-    const airlineCounts = routeData.reduce((acc, flight) => {
-      acc[flight.airline] = (acc[flight.airline] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-    const mostCommonAirline = Object.entries(airlineCounts)
-      .sort(([,a], [,b]) => b - a)[0]?.[0] || '';
-
-    // Calculate average duration (assuming format like "2h 30m")
-    const durations = routeData.map(f => this.parseDuration(f.duration));
-    const averageDuration = durations.reduce((sum, dur) => sum + dur, 0) / durations.length;
-
-    // Analyze best time to book (based on days_left vs price correlation)
-    const bookingAnalysis = routeData.reduce((acc, flight) => {
-      const bucket = this.getDaysLeftBucket(flight.days_left);
-      if (!acc[bucket]) {
-        acc[bucket] = { totalPrice: 0, count: 0 };
-      }
-      acc[bucket].totalPrice += flight.price;
-      acc[bucket].count += 1;
-      return acc;
-    }, {} as Record<string, { totalPrice: number; count: number }>);
-
-    const bestTimeToBook = Object.entries(bookingAnalysis)
-      .map(([bucket, data]) => ({
-        bucket,
-        averagePrice: data.totalPrice / data.count
-      }))
-      .sort((a, b) => a.averagePrice - b.averagePrice)[0]?.bucket || '';
-
-    // Analyze popular time slots
-    const timeSlots = routeData.map(f => this.getTimeSlot(f.departure_time));
-    const timeSlotCounts = timeSlots.reduce((acc, slot) => {
-      acc[slot] = (acc[slot] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-    
-    const popularTimeSlots = Object.entries(timeSlotCounts)
-      .sort(([,a], [,b]) => b - a)
-      .slice(0, 3)
-      .map(([slot]) => slot);
-
-    return {
-      route: `${from} → ${to}`,
-      totalFlights: routeData.length,
-      airlines: airlines.map(a => this.denormalizeAirline(a)),
-      averagePrice: Math.round(averagePrice),
-      minPrice,
-      maxPrice,
-      averageDuration: Math.round(averageDuration),
-      mostCommonAirline: this.denormalizeAirline(mostCommonAirline),
-      bestTimeToBook,
-      popularTimeSlots
-    };
-  }
-
-  /**
-   * Deep route intelligence: airline price positioning, departure-time pricing
-   * and the booking-window curve, computed from the historical records.
-   */
-  public async getRouteIntelligence(from: string, to: string): Promise<RouteIntelligence> {
-    const empty: RouteIntelligence = {
-      route: `${canonicalCity(from)} → ${canonicalCity(to)}`,
-      totalFlights: 0, airlinePositioning: [], timeSlotPricing: [], bookingWindow: [],
-      cheapestAirline: '', cheapestTimeSlot: '', cheapestBookingWindow: '',
-    };
-    if (!this.isDataLoaded) return empty;
-
-    const routeData = this.historicalData.filter(flight =>
-      this.normalizeCity(flight.source_city) === this.normalizeCity(from) &&
-      this.normalizeCity(flight.destination_city) === this.normalizeCity(to) &&
-      flight.class?.toLowerCase?.() === 'economy'
-    );
-    if (routeData.length === 0) return empty;
-
-    const avg = (xs: number[]) => Math.round(xs.reduce((a, b) => a + b, 0) / xs.length);
-
-    // Airline positioning
-    const byAirline = new Map<string, number[]>();
-    for (const f of routeData) {
-      const a = this.denormalizeAirline(f.airline);
-      (byAirline.get(a) ?? byAirline.set(a, []).get(a)!).push(f.price);
-    }
-    const airlinePositioning = [...byAirline.entries()]
-      .map(([airline, prices]) => ({
-        airline, avgPrice: avg(prices), minPrice: Math.min(...prices), count: prices.length,
-      }))
-      .sort((a, b) => a.avgPrice - b.avgPrice);
-
-    // Departure time-slot pricing
-    const bySlot = new Map<string, number[]>();
-    for (const f of routeData) {
-      const s = this.getTimeSlot(f.departure_time);
-      (bySlot.get(s) ?? bySlot.set(s, []).get(s)!).push(f.price);
-    }
-    const timeSlotPricing = [...bySlot.entries()]
-      .map(([slot, prices]) => ({ slot, avgPrice: avg(prices), count: prices.length }))
-      .sort((a, b) => a.avgPrice - b.avgPrice);
-
-    // Booking-window curve
-    const byBucket = new Map<string, number[]>();
-    for (const f of routeData) {
-      const b = this.getDaysLeftBucket(f.days_left);
-      (byBucket.get(b) ?? byBucket.set(b, []).get(b)!).push(f.price);
-    }
-    const bucketOrder = ['0-7 days', '8-21 days', '22-45 days', '46-60 days', '60+ days'];
-    const bookingWindow = [...byBucket.entries()]
-      .map(([bucket, prices]) => ({ bucket, avgPrice: avg(prices) }))
-      .sort((a, b) => bucketOrder.indexOf(a.bucket) - bucketOrder.indexOf(b.bucket));
-
-    return {
-      route: `${canonicalCity(from)} → ${canonicalCity(to)}`,
-      totalFlights: routeData.length,
-      airlinePositioning,
-      timeSlotPricing,
-      bookingWindow,
-      cheapestAirline: airlinePositioning[0]?.airline ?? '',
-      cheapestTimeSlot: timeSlotPricing[0]?.slot ?? '',
-      cheapestBookingWindow: [...bookingWindow].sort((a, b) => a.avgPrice - b.avgPrice)[0]?.bucket ?? '',
-    };
-  }
-
-  /**
-   * Enhance live search results with ML insights
-   */
-  public async enhanceSearchResults<T extends { price: { total: number } }>(
-    flights: T[],
-    from: string,
-    to: string,
-    departureDate: string
-  ): Promise<T[]> {
-    try {
-      const prediction = await this.predictPrice(from, to, departureDate);
-      const analytics = await this.getRouteAnalytics(from, to);
-
-      return flights.map(flight => {
-        // Calculate price comparison
-        const priceComparison = this.comparePriceToHistorical(flight.price.total, prediction);
-        
-        // Add ML insights to flight
-  return {
-          ...flight,
-          mlInsights: {
-            priceComparison,
-            isGoodDeal: flight.price.total <= prediction.historicalData.averagePrice * 0.9,
-            predictedPrice: prediction.predictedPrice,
-            confidence: prediction.confidence,
-            recommendation: priceComparison.recommendation,
-            historicalRank: this.calculatePriceRank(flight.price.total, analytics)
-          }
-  } as T;
-      });
-    } catch (error) {
-      console.error('Error enhancing search results with ML:', error);
-      return flights;
-    }
-  }
-
-  /**
-   * Get price recommendations for a route
-   */
-  public async getPriceRecommendations(from: string, to: string): Promise<{
-    bestPrice: number;
-    worstPrice: number;
-    averagePrice: number;
-    recommendedBookingWindow: string;
-    priceHistory: Array<{ daysLeft: number; averagePrice: number }>;
-  }> {
-    if (!this.isDataLoaded) {
-      throw new Error('Historical data not loaded');
-    }
-
-    const routeData = this.historicalData.filter(flight => 
-      this.normalizeCity(flight.source_city) === this.normalizeCity(from) &&
-      this.normalizeCity(flight.destination_city) === this.normalizeCity(to)
-    );
-
-    const prices = routeData.map(f => f.price);
-    const bestPrice = Math.min(...prices);
-    const worstPrice = Math.max(...prices);
-    const averagePrice = prices.reduce((sum, price) => sum + price, 0) / prices.length;
-
-    // Analyze price history by days left
-    const priceHistory = this.analyzePriceHistory(routeData);
-
-    // Find best booking window
-    const bestWindow = priceHistory
-      .sort((a, b) => a.averagePrice - b.averagePrice)[0];
-
-    const recommendedBookingWindow = this.getBookingWindowText(bestWindow?.daysLeft || 30);
-
-    return {
-      bestPrice,
-      worstPrice,
-      averagePrice: Math.round(averagePrice),
-      recommendedBookingWindow,
-      priceHistory: priceHistory.slice(0, 10) // Limit to top 10 data points
-    };
-  }
-
-  // Helper methods
-  private normalizeCity(city: string): string {
-    // Single source of truth for alias handling (New Delhi/Delhi, Kolkata/Calcutta, ...).
-    return canonicalCity(city);
-  }
-
-  private normalizeAirline(airline: string): string {
-    const airlineMap: Record<string, string> = {
-      'IndiGo': 'Indigo',
-      'Air India': 'Air_India',
-      'SpiceJet': 'SpiceJet',
-      'Akasa Air': 'AirAsia', // Approximate mapping
-      'Vistara': 'Vistara',
-      'GoFirst': 'GO_FIRST'
-    };
-    return airlineMap[airline] || airline;
-  }
-
-  private denormalizeAirline(airline: string): string {
-    const airlineMap: Record<string, string> = {
-      'Indigo': 'IndiGo',
-      'Air_India': 'Air India',
-      'SpiceJet': 'SpiceJet',
-      'AirAsia': 'AirAsia',
-      'Vistara': 'Vistara',
-      'GO_FIRST': 'GoFirst'
-    };
-    return airlineMap[airline] || airline;
-  }
-
-  private parseDuration(duration: string): number {
-    if (!duration) return 0;
-    const trimmed = duration.trim();
-
-    // Indian Airlines.csv stores duration as decimal hours, e.g. "2.17".
-    if (/^\d+(\.\d+)?$/.test(trimmed)) {
-      return Math.round(parseFloat(trimmed) * 60);
-    }
-
-    // Otherwise parse "2h 30m" / "02h 10m" style strings to minutes.
-    const hoursMatch = trimmed.match(/(\d+)\s*h/);
-    const minutesMatch = trimmed.match(/(\d+)\s*m/);
-
-    const hours = hoursMatch ? parseInt(hoursMatch[1]) : 0;
-    const minutes = minutesMatch ? parseInt(minutesMatch[1]) : 0;
-
-    return hours * 60 + minutes;
-  }
-
-  private getDaysLeftBucket(daysLeft: number): string {
-    if (daysLeft <= 7) return '0-7 days';
-    if (daysLeft <= 21) return '8-21 days';
-    if (daysLeft <= 45) return '22-45 days';
-    if (daysLeft <= 60) return '46-60 days';
-    return '60+ days';
-  }
-
-  private getTimeSlot(departureTime: string): string {
-    // Parse departure time categories
-    const timeMap: Record<string, string> = {
-      'Early_Morning': 'Early Morning (6:00-9:00)',
-      'Morning': 'Morning (9:00-12:00)',
-      'Afternoon': 'Afternoon (12:00-15:00)',
-      'Evening': 'Evening (15:00-18:00)',
-      'Night': 'Night (18:00-21:00)',
-      'Late_Night': 'Late Night (21:00-6:00)'
-    };
-    return timeMap[departureTime] || departureTime;
-  }
-
-  private comparePriceToHistorical(currentPrice: number, prediction: PricePrediction) {
-    const { averagePrice, minPrice, maxPrice } = prediction.historicalData;
-    
-    let category = 'Average';
-    let recommendation = '';
-    let percentDifference = 0;
-
-    if (currentPrice <= minPrice * 1.1) {
-      category = 'Excellent Deal';
-      recommendation = 'This is an exceptional price! Book immediately.';
-      percentDifference = Math.round(((averagePrice - currentPrice) / averagePrice) * 100);
-    } else if (currentPrice <= averagePrice * 0.9) {
-      category = 'Good Deal';
-      recommendation = 'This is below average price. Good time to book.';
-      percentDifference = Math.round(((averagePrice - currentPrice) / averagePrice) * 100);
-    } else if (currentPrice <= averagePrice * 1.1) {
-      category = 'Average Price';
-      recommendation = 'Price is around the average for this route.';
-      percentDifference = Math.round(((currentPrice - averagePrice) / averagePrice) * 100);
-    } else if (currentPrice <= maxPrice * 0.9) {
-      category = 'Above Average';
-      recommendation = 'Price is higher than usual. Consider waiting if flexible.';
-      percentDifference = Math.round(((currentPrice - averagePrice) / averagePrice) * 100);
-    } else {
-      category = 'Expensive';
-      recommendation = 'This is quite expensive for this route. Wait if possible.';
-      percentDifference = Math.round(((currentPrice - averagePrice) / averagePrice) * 100);
-    }
-
-    return {
-      category,
-      recommendation,
-      percentDifference,
-      comparedToAverage: percentDifference
-    };
-  }
-
-  private calculatePriceRank(price: number, analytics: RouteAnalytics): string {
-    const priceRatio = price / analytics.averagePrice;
-    
-    if (priceRatio <= 0.8) return 'Excellent (Top 20%)';
-    if (priceRatio <= 0.9) return 'Good (Top 40%)';
-    if (priceRatio <= 1.1) return 'Average (Middle 20%)';
-    if (priceRatio <= 1.2) return 'Above Average (Bottom 40%)';
-    return 'Expensive (Bottom 20%)';
-  }
-
-  private analyzePriceHistory(routeData: HistoricalFlightData[]) {
-    const priceByDaysLeft = routeData.reduce((acc, flight) => {
-      const bucket = Math.floor(flight.days_left / 10) * 10; // Group by 10-day buckets
-      if (!acc[bucket]) {
-        acc[bucket] = { totalPrice: 0, count: 0 };
-      }
-      acc[bucket].totalPrice += flight.price;
-      acc[bucket].count += 1;
-      return acc;
-    }, {} as Record<number, { totalPrice: number; count: number }>);
-
-    return Object.entries(priceByDaysLeft)
-      .map(([daysLeft, data]) => ({
-        daysLeft: parseInt(daysLeft),
-        averagePrice: Math.round(data.totalPrice / data.count)
-      }))
-      .sort((a, b) => b.daysLeft - a.daysLeft);
-  }
-
-  private getBookingWindowText(daysLeft: number): string {
-    if (daysLeft >= 60) return '60+ days before departure';
-    if (daysLeft >= 45) return '45-60 days before departure';
-    if (daysLeft >= 30) return '30-45 days before departure';
-    if (daysLeft >= 14) return '2-4 weeks before departure';
-    if (daysLeft >= 7) return '1-2 weeks before departure';
-    return 'Less than 1 week before departure';
-  }
-
-  /**
-   * Get available routes from historical data
-   */
-  public getAvailableRoutes(): Array<{ from: string; to: string; flightCount: number }> {
-    if (!this.isDataLoaded) return [];
-
-    // Group by canonical city names so aliases collapse into one route.
-    const routeCounts = this.historicalData.reduce((acc, flight) => {
-      const route = `${canonicalCity(flight.source_city)}→${canonicalCity(flight.destination_city)}`;
-      acc[route] = (acc[route] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    return Object.entries(routeCounts)
-      .map(([route, count]) => {
-        const [from, to] = route.split('→');
-        return { from, to, flightCount: count };
-      })
-      .sort((a, b) => b.flightCount - a.flightCount);
-  }
-
-  /**
-   * Get ML insights for dashboard
-   */
-  public async getDashboardInsights(): Promise<{
-    totalRoutes: number;
-    totalFlights: number;
-    mostPopularRoute: string;
-    averagePriceAcrossRoutes: number;
-    priceRangeAcrossRoutes: { min: number; max: number };
-    topAirlines: Array<{ airline: string; marketShare: number }>;
-  }> {
-    if (!this.isDataLoaded) {
-      throw new Error('Historical data not loaded');
-    }
-
-    const routes = this.getAvailableRoutes();
-    const totalRoutes = routes.length;
-    const totalFlights = this.historicalData.length;
-    const mostPopularRoute = routes[0]?.from && routes[0]?.to 
-      ? `${routes[0].from} → ${routes[0].to}` 
-      : 'No data';
-
-    const allPrices = this.historicalData.map(f => f.price);
-    const averagePriceAcrossRoutes = allPrices.reduce((sum, price) => sum + price, 0) / allPrices.length;
-    
-    // Use efficient min/max calculation for large arrays
-    let minPrice = allPrices[0];
-    let maxPrice = allPrices[0];
-    for (const price of allPrices) {
-      if (price < minPrice) minPrice = price;
-      if (price > maxPrice) maxPrice = price;
-    }
-    
-    const priceRangeAcrossRoutes = {
-      min: minPrice,
-      max: maxPrice
-    };
-
-    // Calculate airline market share
-    const airlineCounts = this.historicalData.reduce((acc, flight) => {
-      const airline = this.denormalizeAirline(flight.airline);
-      acc[airline] = (acc[airline] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    const topAirlines = Object.entries(airlineCounts)
-      .map(([airline, count]) => ({
-        airline,
-        marketShare: Math.round((count / totalFlights) * 100)
-      }))
-      .sort((a, b) => b.marketShare - a.marketShare)
-      .slice(0, 5);
-
-    return {
-      totalRoutes,
-      totalFlights,
-      mostPopularRoute,
-      averagePriceAcrossRoutes: Math.round(averagePriceAcrossRoutes),
-      priceRangeAcrossRoutes,
-      topAirlines
-    };
-  }
+export interface PriceRecommendations {
+  route: string;
+  bestPrice: number;
+  worstPrice: number;
+  averagePrice: number;
+  recommendedBookingWindow: string;
+  priceHistory: Array<{ daysLeft: number; averagePrice: number }>;
 }
 
-export const mlService = new MLService();
-export type { PricePrediction, RouteAnalytics, RouteIntelligence };
+// ---- Queries --------------------------------------------------------------------
+
+/**
+ * What this route has historically cost, optionally for an airline and for how far
+ * ahead `departureDate` is. Null when there is no history for the route.
+ */
+export function historicalRange(
+  from: string,
+  to: string,
+  opts: { departureDate?: string; airline?: string; travelClass?: string } = {},
+): HistoricalRange | null {
+  const r = routeStats(from, to, opts.travelClass);
+  if (!r) return null;
+  const key = opts.airline ? airlineKey(opts.airline) : undefined;
+  const c = (key && r.byAirline[key]) || r.all;
+
+  const out: HistoricalRange = {
+    route: routeLabel(from, to),
+    travelClass: r.class,
+    bookings: c.count,
+    averagePrice: avg(c),
+    minPrice: c.min,
+    maxPrice: c.max,
+  };
+  if (opts.departureDate) {
+    const label = windowOf(Math.max(0, daysBetween(todayISO(), opts.departureDate)));
+    const w = r.byWindow[label];
+    if (w) out.window = { label, averagePrice: avg(w), bookings: w.count };
+  }
+  return out;
+}
+
+export function getRouteAnalytics(from: string, to: string): RouteAnalytics | null {
+  const r = routeStats(from, to);
+  if (!r) return null;
+  const airlines = Object.entries(r.byAirline).sort(([, a], [, b]) => b.count - a.count);
+  const windows = Object.entries(r.byWindow).sort(([, a], [, b]) => avg(a) - avg(b));
+  const slots = Object.entries(r.bySlot).sort(([, a], [, b]) => b.count - a.count);
+  return {
+    route: routeLabel(from, to),
+    totalFlights: r.all.count,
+    airlines: airlines.map(([a]) => airlineName(a)),
+    averagePrice: avg(r.all),
+    minPrice: r.all.min,
+    maxPrice: r.all.max,
+    averageDuration: r.durationCount ? Math.round(r.durationSum / r.durationCount) : 0,
+    mostCommonAirline: airlines[0] ? airlineName(airlines[0][0]) : '',
+    bestTimeToBook: windows[0]?.[0] ?? '',
+    popularTimeSlots: slots.slice(0, 3).map(([s]) => slotName(s)),
+  };
+}
+
+export function getRouteIntelligence(from: string, to: string): RouteIntelligence | null {
+  const r = routeStats(from, to);
+  if (!r) return null;
+  const airlinePositioning = Object.entries(r.byAirline)
+    .map(([a, c]) => ({ airline: airlineName(a), avgPrice: avg(c), minPrice: c.min, count: c.count }))
+    .sort((a, b) => a.avgPrice - b.avgPrice);
+  const timeSlotPricing = Object.entries(r.bySlot)
+    .map(([s, c]) => ({ slot: slotName(s), avgPrice: avg(c), count: c.count }))
+    .sort((a, b) => a.avgPrice - b.avgPrice);
+  const bookingWindow = WINDOW_ORDER.filter((w) => r.byWindow[w]).map((w) => ({ bucket: w, avgPrice: avg(r.byWindow[w]) }));
+  return {
+    route: routeLabel(from, to),
+    totalFlights: r.all.count,
+    airlinePositioning,
+    timeSlotPricing,
+    bookingWindow,
+    cheapestAirline: airlinePositioning[0]?.airline ?? '',
+    cheapestTimeSlot: timeSlotPricing[0]?.slot ?? '',
+    cheapestBookingWindow: [...bookingWindow].sort((a, b) => a.avgPrice - b.avgPrice)[0]?.bucket ?? '',
+  };
+}
+
+const bookingWindowText = (daysLeft: number) =>
+  daysLeft >= 60
+    ? '60 or more days before departure'
+    : daysLeft >= 40
+      ? '40 to 60 days before departure'
+      : daysLeft >= 20
+        ? '20 to 40 days before departure'
+        : daysLeft >= 10
+          ? '10 to 20 days before departure'
+          : 'Less than 10 days before departure';
+
+export function getPriceRecommendations(from: string, to: string): PriceRecommendations | null {
+  const r = routeStats(from, to);
+  if (!r) return null;
+  const priceHistory = Object.entries(r.byDecade)
+    .map(([d, c]) => ({ daysLeft: Number(d), averagePrice: avg(c) }))
+    .sort((a, b) => b.daysLeft - a.daysLeft);
+  const best = [...priceHistory].sort((a, b) => a.averagePrice - b.averagePrice)[0];
+  return {
+    route: routeLabel(from, to),
+    bestPrice: r.all.min,
+    worstPrice: r.all.max,
+    averagePrice: avg(r.all),
+    recommendedBookingWindow: bookingWindowText(best?.daysLeft ?? 30),
+    priceHistory,
+  };
+}
+
+/** Routes with history, busiest first. Economy and business are counted together. */
+export function getAvailableRoutes(): Array<{ from: string; to: string; flightCount: number }> {
+  const counts = new Map<string, number>();
+  for (const r of data.routes) {
+    const k = `${canonicalCity(r.from)}|${canonicalCity(r.to)}`;
+    counts.set(k, (counts.get(k) ?? 0) + r.all.count);
+  }
+  return [...counts.entries()]
+    .map(([k, flightCount]) => {
+      const [from, to] = k.split('|');
+      return { from, to, flightCount };
+    })
+    .sort((a, b) => b.flightCount - a.flightCount);
+}
+
+export function getDashboardInsights() {
+  const routes = getAvailableRoutes();
+  let sum = 0;
+  let min = Infinity;
+  let max = -Infinity;
+  for (const r of data.routes) {
+    sum += r.all.sum;
+    min = Math.min(min, r.all.min);
+    max = Math.max(max, r.all.max);
+  }
+  const topAirlines = Object.entries(data.airlines)
+    .map(([a, n]) => ({ airline: airlineName(a), marketShare: Math.round((n / data.rows) * 100) }))
+    .sort((a, b) => b.marketShare - a.marketShare)
+    .slice(0, 5);
+  return {
+    totalRoutes: routes.length,
+    totalFlights: data.rows,
+    mostPopularRoute: routes[0] ? `${routes[0].from} → ${routes[0].to}` : '',
+    averagePriceAcrossRoutes: Math.round(sum / data.rows),
+    priceRangeAcrossRoutes: { min, max },
+    topAirlines,
+  };
+}
+
+export interface FlightHistoryInsight {
+  /** Always historical: how this fare compares with past bookings on the route. */
+  source: 'historical';
+  category: 'Low for this route' | 'Below average' | 'About average' | 'Above average' | 'High for this route';
+  /** Percent above (positive) or below (negative) the historical average. */
+  comparedToAverage: number;
+  historicalAverage: number;
+  bookings: number;
+}
+
+/**
+ * Compares each fare with what the route has historically cost. This is a comparison,
+ * not a prediction, and is labelled as one; flights on routes with no history are
+ * returned unchanged.
+ */
+export function enhanceSearchResults<T>(
+  flights: T[],
+  priceOf: (flight: T) => number,
+  from: string,
+  to: string,
+  departureDate: string,
+  travelClass = 'economy',
+): Array<T & { historyInsight?: FlightHistoryInsight }> {
+  const range = historicalRange(from, to, { departureDate, travelClass });
+  if (!range) return flights as Array<T & { historyInsight?: FlightHistoryInsight }>;
+  const reference = range.window?.averagePrice ?? range.averagePrice;
+  return flights.map((f) => {
+    const price = priceOf(f);
+    if (!(price > 0)) return f as T & { historyInsight?: FlightHistoryInsight };
+    const diff = Math.round(((price - reference) / reference) * 100);
+    const category: FlightHistoryInsight['category'] =
+      price <= range.minPrice * 1.1
+        ? 'Low for this route'
+        : diff <= -10
+          ? 'Below average'
+          : diff <= 10
+            ? 'About average'
+            : price >= range.maxPrice * 0.9
+              ? 'High for this route'
+              : 'Above average';
+    return {
+      ...f,
+      historyInsight: { source: 'historical', category, comparedToAverage: diff, historicalAverage: reference, bookings: range.window?.bookings ?? range.bookings },
+    };
+  });
+}

@@ -18,12 +18,12 @@ export async function POST(request: NextRequest) {
     }, { maxRetries: 1, timeout: 4000 });
 
     if (!result) {
-      return NextResponse.json({ success: false, error: 'ML API unavailable' }, { status: 503 });
+      return NextResponse.json({ success: false, code: 'model_unavailable', error: 'The fare prediction model isn’t connected.' }, { status: 503 });
     }
     return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Unknown error' },
+      { success: false, code: 'bad_request', error: error instanceof Error ? error.message : 'Unknown error' },
       { status: 503 }
     );
   }

@@ -29,6 +29,17 @@ export function Field({
 }: FieldProps) {
   const errorId = htmlFor ? `${htmlFor}-error` : undefined;
   const hintId = htmlFor ? `${htmlFor}-hint` : undefined;
+  const describedBy = (error ? errorId : hint ? hintId : undefined) || undefined;
+
+  // Point the control at its hint or error, so a screen reader reads it with the field
+  // rather than only when it first appears. Only a single element child can take it.
+  const child =
+    describedBy && React.isValidElement<{ 'aria-describedby'?: string; 'aria-invalid'?: boolean }>(children)
+      ? React.cloneElement(children, {
+          'aria-describedby': [children.props['aria-describedby'], describedBy].filter(Boolean).join(' '),
+          ...(error ? { 'aria-invalid': true } : {}),
+        })
+      : children;
 
   return (
     <div className={cn('flex flex-col gap-2', className)}>
@@ -41,7 +52,7 @@ export function Field({
           {hint}
         </p>
       )}
-      {children}
+      {child}
       {error && (
         <p id={errorId} role="alert" className="text-xs font-medium text-neg-fg">
           {error}

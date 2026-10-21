@@ -32,6 +32,9 @@ import {
   removeAlert,
   checkAlert,
   restoreTrip,
+  restoreAlert,
+  clearRecentSearches,
+  recordSearch,
   isExpired,
   type CheckResult,
   type SavedTrip,
@@ -39,6 +42,7 @@ import {
   type PriceAlert,
 } from '@/lib/saved-trips';
 import { subscribeToStorage } from '@/lib/storage';
+import { todayISO } from '@/lib/dates';
 import { fromItinerary } from '@/lib/planner/from-itinerary';
 import { useTrip as usePlanner } from '@/lib/planner/store';
 import { BudgetCard, tripHref } from '@/components/planner/BudgetList';
@@ -290,7 +294,7 @@ export default function DashboardPage() {
                   <ul className="grid gap-5 md:grid-cols-2">
                     {trips.map((trip) => (
                       <li key={trip.id} className="flex">
-                        <Card interactive className="flex w-full flex-col">
+                        <Card className="flex w-full flex-col">
                           <CardContent className="flex flex-1 flex-col p-6">
                             <div className="flex items-start justify-between gap-4">
                               <h2 className="text-lg font-semibold text-ink">
@@ -326,7 +330,12 @@ export default function DashboardPage() {
                             )}
 
                             {/* Actions pinned to the bottom so they line up across cards. */}
-                            <div className="mt-auto flex items-center gap-2 pt-6">
+                            <div className="mt-auto flex flex-wrap items-center gap-2 pt-6">
+                              {trip.itinerary !== undefined && (
+                                <Button size="sm" asChild>
+                                  <Link href={`/itinerary?saved=${encodeURIComponent(trip.id)}`}>View itinerary</Link>
+                                </Button>
+                              )}
                               <Button variant="outline" size="sm" onClick={() => turnIntoBudget(trip)}>
                                 <Wallet className="h-4 w-4" />
                                 Turn into a budget
@@ -360,8 +369,8 @@ export default function DashboardPage() {
                   <EmptyState
                     as="h3"
                     icon={<BellRinging className="h-6 w-6" />}
-                    title="No price alerts"
-                    description="Set a target price on a route and we will tell you when the model expects it to drop."
+                    title="No routes watched"
+                    description="Search a route and choose Watch this route with the fare you want to pay. You can then check it against the forecast here. We don’t send notifications."
                     action={
                       <Button asChild>
                         <Link href="/search">Check a fare</Link>
@@ -370,21 +379,27 @@ export default function DashboardPage() {
                   />
                 ) : (
                   <>
-                    <div className="mb-5 flex justify-end">
+                    <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                      <p className="text-sm text-ink-secondary">
+                        Each check compares your target with the model’s forecast for that day. Nothing is checked in the
+                        background.
+                      </p>
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={checkAll}
-                        disabled={checkingAll}
+                        disabled={checkingAll || alerts.every(isExpired)}
                       >
                         <ArrowsClockwise className="h-4 w-4" />
-                        {checkingAll ? 'Checking' : 'Re-check all'}
+                        {checkingAll ? 'Checking' : 'Check all'}
                       </Button>
                     </div>
                     <ul className="space-y-3">
-                      {alerts.map((a) => (
+                      {alerts.map((a) => {
+                        const expired = isExpired(a);
+                        return (
                         <li key={a.id}>
-                          <Card className={a.triggered ? 'border-pos-fg/25 bg-pos' : undefined}>
+                          <Card className={a.triggered && !expired ? 'border-pos-fg/25 bg-pos' : expired ? 'opacity-70' : undefined}>
                             <CardContent className="flex flex-wrap items-center justify-between gap-4 p-5">
                               <div className="min-w-0">
                                 <p className="font-medium text-ink">
@@ -395,29 +410,39 @@ export default function DashboardPage() {
                                   {inr(a.targetPrice)}
                                 </p>
                                 <p className="mt-1 text-xs text-ink-tertiary [font-variant-numeric:tabular-nums]">
-                                  {a.lastChecked
-                                    ? `Checked ${shortDate(a.lastChecked)} · model price ${inr(a.lastPrice)}`
-                                    : 'Not checked yet'}
+                                  {expired
+                                    ? 'This date has passed'
+                                    : a.lastChecked && a.lastPrice !== undefined
+                                      ? `Checked ${shortDate(a.lastChecked)} · forecast ${inr(a.lastPrice)}`
+                                      : 'Not checked yet'}
                                 </p>
                               </div>
                               <div className="flex shrink-0 items-center gap-2">
-                                {a.triggered && <Badge variant="positive">At target</Badge>}
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={checking === a.id}
-                                  onClick={() => checkOne(a)}
-                                >
-                                  {checking === a.id ? 'Checking' : 'Check now'}
-                                </Button>
+                                {expired ? (
+                                  <Badge variant="neutral">Expired</Badge>
+                                ) : (
+                                  a.triggered && <Badge variant="positive">At target</Badge>
+                                )}
+                                {!expired && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={checking === a.id}
+                                    onClick={() => checkOne(a)}
+                                  >
+                                    {checking === a.id ? 'Checking' : 'Check now'}
+                                  </Button>
+                                )}
                                 <Button
                                   variant="ghost"
                                   size="icon"
-                                  aria-label={`Delete alert for ${a.origin} to ${a.destination}`}
+                                  aria-label={`Stop watching ${a.origin} to ${a.destination}`}
                                   onClick={() => {
                                     removeAlert(a.id);
                                     refresh();
-                                    toast.success('Alert removed');
+                                    toast(`Stopped watching ${a.origin} to ${a.destination}`, {
+                                      action: { label: 'Undo', onClick: () => { restoreAlert(a); refresh(); } },
+                                    });
                                   }}
                                 >
                                   <Trash className="h-4 w-4" />
@@ -426,7 +451,8 @@ export default function DashboardPage() {
                             </CardContent>
                           </Card>
                         </li>
-                      ))}
+                        );
+                      })}
                     </ul>
                   </>
                 )}
@@ -447,26 +473,57 @@ export default function DashboardPage() {
                     }
                   />
                 ) : (
-                  <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
-                    {searches.map((s) => (
-                      <li key={s.id}>
-                        <Link
-                          href="/search"
-                          className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 px-5 py-4 transition-colors hover:bg-surface-hover"
-                        >
-                          <span className="font-medium text-ink">
-                            {s.origin} to {s.destination}
-                          </span>
-                          <span className="text-sm text-ink-secondary [font-variant-numeric:tabular-nums]">
-                            {shortDate(s.departureDate)} · {s.travelClass}
-                          </span>
-                          <span className="font-mono text-sm text-ink [font-variant-numeric:tabular-nums]">
-                            {inr(s.lowestPrice)}
-                          </span>
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
+                  <>
+                    <div className="mb-5 flex justify-end">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          const before = searches;
+                          clearRecentSearches();
+                          refresh();
+                          toast('Recent searches cleared', {
+                            action: {
+                              label: 'Undo',
+                              // Re-record oldest first, so the newest ends up on top again.
+                              onClick: () => {
+                                [...before].reverse().forEach(({ id: _id, searchedAt: _at, ...s }) => recordSearch(s));
+                                refresh();
+                              },
+                            },
+                          });
+                        }}
+                      >
+                        Clear all
+                      </Button>
+                    </div>
+                    <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
+                      {searches.map((s) => {
+                        // A past date cannot be searched, so link to the route and let the user pick a day.
+                        const past = s.departureDate < todayISO();
+                        const q = new URLSearchParams({ from: s.origin, to: s.destination, ...(past ? {} : { date: s.departureDate }), ...(s.travelClass !== 'economy' ? { class: s.travelClass } : {}) });
+                        return (
+                          <li key={s.id}>
+                            <Link
+                              href={`/search?${q}`}
+                              className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 px-5 py-4 transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand"
+                            >
+                              <span className="font-medium text-ink">
+                                {s.origin} to {s.destination}
+                              </span>
+                              <span className="text-sm text-ink-secondary [font-variant-numeric:tabular-nums]">
+                                {shortDate(s.departureDate)}
+                                {past && ' (passed)'} · {s.travelClass}
+                              </span>
+                              <span className="font-mono text-sm text-ink [font-variant-numeric:tabular-nums]">
+                                {s.lowestPrice !== undefined ? inr(s.lowestPrice) : 'No fares found'}
+                              </span>
+                            </Link>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </>
                 )}
               </TabsContent>
             </Tabs>

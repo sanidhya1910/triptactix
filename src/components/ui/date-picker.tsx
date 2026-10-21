@@ -13,18 +13,30 @@ import {
 } from "@/components/ui/popover"
 
 interface DatePickerProps {
+  id?: string
   date?: Date
   onDateChange?: (date: Date | undefined) => void
   placeholder?: string
   className?: string
   disabled?: boolean
+  /** Extra days to disable, on top of past days. */
   disabledDates?: (date: Date) => boolean
+  /** Earliest selectable day. Defaults to today; past days are never selectable. */
   minDate?: Date
   maxDate?: Date
   name?: string
+  invalid?: boolean
+  "aria-describedby"?: string
+}
+
+const startOfToday = () => {
+  const t = new Date()
+  t.setHours(0, 0, 0, 0)
+  return t
 }
 
 export function DatePicker({
+  id,
   date,
   onDateChange,
   placeholder = "Pick a date",
@@ -34,40 +46,32 @@ export function DatePicker({
   minDate,
   maxDate,
   name,
+  invalid,
+  "aria-describedby": describedBy,
 }: DatePickerProps) {
   const [isOpen, setIsOpen] = React.useState(false)
 
-  // Default disabled function that prevents selecting dates before today
-  const defaultDisabledDates = React.useCallback((date: Date) => {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    
-    let isDisabled = date < today
-    
-    if (minDate) {
-      isDisabled = isDisabled || date < minDate
-    }
-    
-    if (maxDate) {
-      isDisabled = isDisabled || date > maxDate
-    }
-    
-    if (disabledDates) {
-      isDisabled = isDisabled || disabledDates(date)
-    }
-    
-    return isDisabled
-  }, [disabledDates, minDate, maxDate])
+  // Built here but, until now, never passed to the calendar, so past dates could be picked.
+  const isDisabled = React.useCallback(
+    (d: Date) =>
+      d < startOfToday() || (minDate !== undefined && d < minDate) || (maxDate !== undefined && d > maxDate) || !!disabledDates?.(d),
+    [disabledDates, minDate, maxDate],
+  )
 
   return (
     <div className={className}>
       <Popover open={isOpen} onOpenChange={setIsOpen}>
         <PopoverTrigger asChild>
           <Button
+            id={id}
+            type="button"
             variant="outline"
+            aria-invalid={invalid || undefined}
+            aria-describedby={describedBy}
             className={cn(
               "h-10 w-full justify-start rounded-md border border-line-strong bg-surface text-left font-normal hover:border-ink/25 hover:bg-surface focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15",
-              !date && "text-ink-tertiary"
+              !date && "text-ink-tertiary",
+              invalid && "border-neg-fg",
             )}
             disabled={disabled}
           >
@@ -82,19 +86,14 @@ export function DatePicker({
               onDateChange?.(selectedDate || undefined)
               setIsOpen(false)
             }}
-            minDate={minDate}
+            minDate={minDate && minDate > startOfToday() ? minDate : startOfToday()}
             maxDate={maxDate}
+            tileDisabled={isDisabled}
             className="rounded-md border-0"
           />
         </PopoverContent>
       </Popover>
-      {name && (
-        <input
-          type="hidden"
-          name={name}
-          value={date ? format(date, "yyyy-MM-dd") : ""}
-        />
-      )}
+      {name && <input type="hidden" name={name} value={date ? format(date, "yyyy-MM-dd") : ""} />}
     </div>
   )
 }
@@ -110,6 +109,8 @@ interface DateRangePickerProps {
   disabled?: boolean
   minDate?: Date
   maxDate?: Date
+  startError?: string
+  endError?: string
 }
 
 export function DateRangePicker({
@@ -123,42 +124,25 @@ export function DateRangePicker({
   disabled = false,
   minDate,
   maxDate,
+  startError,
+  endError,
 }: DateRangePickerProps) {
+  const id = React.useId()
+
   const handleStartDateChange = (date: Date | undefined) => {
     onStartDateChange?.(date)
-    // If end date is before new start date, clear it
-    if (date && endDate && endDate < date) {
-      onEndDateChange?.(undefined)
-    }
+    // A return date before the new departure date is no longer valid.
+    if (date && endDate && endDate < date) onEndDateChange?.(undefined)
   }
 
-  const endDateDisabled = React.useCallback((date: Date) => {
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    
-    let isDisabled = date < today
-    
-    // End date cannot be before start date
-    if (startDate) {
-      isDisabled = isDisabled || date < startDate
-    }
-    
-    if (minDate) {
-      isDisabled = isDisabled || date < minDate
-    }
-    
-    if (maxDate) {
-      isDisabled = isDisabled || date > maxDate
-    }
-    
-    return isDisabled
-  }, [startDate, minDate, maxDate])
-
   return (
-    <div className={cn("grid grid-cols-1 md:grid-cols-2 gap-4", className)}>
-      <div className="space-y-2">
-        <label className="text-sm font-medium text-ink">Departure date</label>
+    <div className={cn("grid grid-cols-1 gap-4 md:grid-cols-2", className)}>
+      <div className="flex flex-col gap-2">
+        <label htmlFor={`${id}-start`} className="text-sm font-medium text-ink">
+          Departure date
+        </label>
         <DatePicker
+          id={`${id}-start`}
           date={startDate}
           onDateChange={handleStartDateChange}
           placeholder={startPlaceholder}
@@ -166,18 +150,37 @@ export function DateRangePicker({
           minDate={minDate}
           maxDate={maxDate}
           name="departureDate"
+          invalid={!!startError}
+          aria-describedby={startError ? `${id}-start-error` : undefined}
         />
+        {startError && (
+          <p id={`${id}-start-error`} role="alert" className="text-xs font-medium text-neg-fg">
+            {startError}
+          </p>
+        )}
       </div>
-      <div className="space-y-2">
-        <label className="text-sm font-medium text-ink">Return date</label>
+      <div className="flex flex-col gap-2">
+        <label htmlFor={`${id}-end`} className="text-sm font-medium text-ink">
+          Return date
+        </label>
         <DatePicker
+          id={`${id}-end`}
           date={endDate}
           onDateChange={onEndDateChange}
           placeholder={endPlaceholder}
           disabled={disabled}
-          disabledDates={endDateDisabled}
+          // The return can be the same day as departure, never before it.
+          minDate={startDate ?? minDate}
+          maxDate={maxDate}
           name="returnDate"
+          invalid={!!endError}
+          aria-describedby={endError ? `${id}-end-error` : undefined}
         />
+        {endError && (
+          <p id={`${id}-end-error`} role="alert" className="text-xs font-medium text-neg-fg">
+            {endError}
+          </p>
+        )}
       </div>
     </div>
   )

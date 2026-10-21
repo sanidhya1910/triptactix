@@ -32,8 +32,9 @@ export default function NotFound() {
             <h2 className="text-sm font-semibold text-ink">Try one of these</h2>
             <ul className="mt-4 space-y-3">
               {[
-                { href: '/itinerary', label: 'Plan a trip with the AI planner' },
-                { href: '/dashboard', label: 'Your saved trips and price alerts' },
+                { href: '/itinerary', label: 'Plan a trip with an AI itinerary' },
+                { href: '/planner', label: 'Cost a trip in the budget planner' },
+                { href: '/dashboard', label: 'Your saved trips, budgets and watched routes' },
                 { href: '/ml-dashboard', label: 'Fare data behind the predictions' },
               ].map((item) => (
                 <li key={item.href}>

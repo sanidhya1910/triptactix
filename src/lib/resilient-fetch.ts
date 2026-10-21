@@ -6,13 +6,20 @@ export interface RetryOptions {
 }
 
 /**
- * Base URL of the Python ML API. Configurable via env so it works in
- * production (a hosted API) instead of being hardcoded to localhost.
+ * Base URL of the Python prediction model, from ML_API_URL, or null when none is set.
+ *
+ * Read on each call rather than at import, because on Workers the environment is
+ * filled in per request. Only local development falls back to localhost; in production
+ * an unset URL means "not connected", which callers report to the user instead of
+ * quietly trying localhost and timing out.
  */
-export const ML_API_BASE =
-  process.env.ML_API_URL ||
-  process.env.NEXT_PUBLIC_ML_API_URL ||
-  'http://localhost:8000';
+export function mlApiBase(): string | null {
+  const url = process.env.ML_API_URL?.trim();
+  if (url) return url.replace(/\/+$/, '');
+  return process.env.NODE_ENV === 'development' ? 'http://localhost:8000' : null;
+}
+
+export const isModelConfigured = () => mlApiBase() !== null;
 
 export class NetworkError extends Error {
   constructor(public code: string, message: string, public originalError?: Error) {
@@ -83,7 +90,6 @@ export async function resilientFetch(
         config.maxDelay
       );
 
-      console.warn(`API call failed (attempt ${attempt + 1}/${config.maxRetries + 1}), retrying in ${delay}ms:`, error.message);
       await sleep(delay);
     }
   }
@@ -122,9 +128,11 @@ export async function callMLAPI<T>(
     if (process.env.NEXT_BUILD || process.env.NODE_ENV === 'test') {
       return null;
     }
+    const base = mlApiBase();
+    if (!base) return null;
 
     const response = await resilientFetch(
-      `${ML_API_BASE}${endpoint}`,
+      `${base}${endpoint}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -134,7 +142,6 @@ export async function callMLAPI<T>(
     );
 
     if (!response.ok) {
-      console.warn(`ML API returned ${response.status}: ${response.statusText}`);
       return null;
     }
 
@@ -143,9 +150,7 @@ export async function callMLAPI<T>(
 
   } catch (error) {
     if (error instanceof NetworkError) {
-      console.warn(`ML API network error (${error.code}): ${error.message}`);
     } else {
-      console.warn('ML API call failed:', error instanceof Error ? error.message : error);
     }
     return null;
   }

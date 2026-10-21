@@ -1,129 +1,123 @@
 'use client';
 
-import { useState } from 'react';
-import { toast } from 'sonner';
-import { AirplaneTilt, TrendUp, TrendDown, Star } from '@phosphor-icons/react/ssr';
-import SearchForm from '@/components/search/SearchForm';
-import { SearchParams, SearchResults, Flight } from '@/types/travel';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { SkeletonCard, Skeleton } from '@/components/ui/skeleton';
-import { EmptyState } from '@/components/ui/empty-state';
-import PriceTrendAnalysis from '@/components/charts/PriceTrendAnalysis';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { AirplaneTilt, ArrowClockwise, ArrowSquareOut, Bed, PlugsConnected, Star } from '@phosphor-icons/react/ssr';
+import SearchForm, { type SearchQuery } from '@/components/search/SearchForm';
+import RouteInsights from '@/components/search/RouteInsights';
 import FareCalendar from '@/components/charts/FareCalendar';
-import { recordSearch } from '@/lib/saved-trips';
 import { AppShell } from '@/components/layout/AppShell';
 import { SiteFooter } from '@/components/layout/SiteFooter';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Skeleton, SkeletonCard } from '@/components/ui/skeleton';
+import { isISODate } from '@/lib/dates';
+import { recordSearch } from '@/lib/saved-trips';
+import type { SearchFlight, SearchResponse } from '@/app/api/search/route';
 
-interface RealtimeSearchResponse {
-  success: boolean;
-  data: {
-    flights: Flight[];
-    searchId: string;
-    timestamp: Date;
-    totalFound: number;
-    sources: string[];
-    priceAnalysis?: {
-      avgHistoricalPrice: number;
-      avgCurrentPrice: number;
-      priceTrend: 'increasing' | 'decreasing' | 'stable';
-      priceRange: { min: number; max: number };
-      bestDealId: string;
-    };
-    recommendations?: string[];
-    searchParams: unknown;
-    fallback?: boolean;
+const inr = (n: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n);
+const mono = 'font-mono [font-variant-numeric:tabular-nums]';
+const duration = (m: number) => (m > 0 ? `${Math.floor(m / 60)}h ${m % 60}m` : '');
+
+const CLASSES = ['economy', 'premium', 'business', 'first'] as const;
+
+/** Reads a search from the URL, so a search can be linked to, shared and re-run. */
+function queryFromURL(p: URLSearchParams): SearchQuery | null {
+  const from = p.get('from')?.trim();
+  const to = p.get('to')?.trim();
+  const date = p.get('date') ?? '';
+  if (!from || !to || !isISODate(date)) return null;
+  const ret = p.get('return') ?? '';
+  const cls = p.get('class') as SearchQuery['travelClass'];
+  const n = (k: string, def: number, min: number) => Math.min(9, Math.max(min, Number(p.get(k)) || def));
+  return {
+    from,
+    to,
+    departureDate: date,
+    returnDate: isISODate(ret) && ret >= date ? ret : undefined,
+    adults: n('adults', 1, 1),
+    children: n('children', 0, 0),
+    infants: n('infants', 0, 0),
+    travelClass: CLASSES.includes(cls) ? cls : 'economy',
   };
 }
 
-const formatDuration = (minutes: number) =>
-  `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+function queryToURL(q: SearchQuery): string {
+  const p = new URLSearchParams({ from: q.from, to: q.to, date: q.departureDate });
+  if (q.returnDate) p.set('return', q.returnDate);
+  if (q.travelClass !== 'economy') p.set('class', q.travelClass);
+  if (q.adults !== 1) p.set('adults', String(q.adults));
+  if (q.children) p.set('children', String(q.children));
+  if (q.infants) p.set('infants', String(q.infants));
+  return p.toString();
+}
 
-const formatPrice = (amount: number) =>
-  new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 0,
-  }).format(amount);
+type State =
+  | { kind: 'idle' }
+  | { kind: 'loading'; query: SearchQuery }
+  | { kind: 'done'; query: SearchQuery; data: SearchResponse }
+  | { kind: 'failed'; query: SearchQuery; message: string };
 
-const clockTime = (value?: string | Date, fallback = '--:--') =>
-  value
-    ? new Date(value).toLocaleTimeString('en-IN', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      })
-    : fallback;
+function SearchPageInner() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const fromURL = useMemo(() => queryFromURL(new URLSearchParams(params.toString())), [params]);
+  const [state, setState] = useState<State>({ kind: 'idle' });
+  const resultsRef = useRef<HTMLDivElement>(null);
+  // Bumps on every search so a slow earlier response can never overwrite a newer one.
+  const seq = useRef(0);
 
-/** Maps the model's free-text recommendation onto the semantic pastel scale. */
-const recommendationVariant = (recommendation: string) => {
-  if (/excellent|great/i.test(recommendation)) return 'positive' as const;
-  if (/wait|overpriced/i.test(recommendation)) return 'negative' as const;
-  return 'info' as const;
-};
-
-export default function SearchPage() {
-  const [searchResults, setSearchResults] = useState<SearchResults | null>(null);
-  const [realtimeResults, setRealtimeResults] = useState<RealtimeSearchResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [searchType, setSearchType] = useState<'standard' | 'realtime'>('standard');
-  const [currentSearchParams, setCurrentSearchParams] = useState<SearchParams | null>(null);
-
-  const handleSearch = async (params: SearchParams, useMLPredictions = false) => {
-    setLoading(true);
-    setSearchType(useMLPredictions ? 'realtime' : 'standard');
-    setCurrentSearchParams(params);
-
+  const run = useCallback(async (query: SearchQuery) => {
+    const id = ++seq.current;
+    // A new search replaces the old results at once, rather than leaving the previous
+    // route's flights on screen under the new route's charts.
+    setState({ kind: 'loading', query });
     try {
-      const response = await fetch('/api/search', {
+      const res = await fetch('/api/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...params, useMLPredictions }),
+        body: JSON.stringify(query),
       });
-
-      const data = await response.json();
-      if (!data.success) {
-        throw new Error(data.error?.message || 'Search failed');
+      const data = await res.json().catch(() => null);
+      if (id !== seq.current) return;
+      if (!res.ok || !data?.success) {
+        setState({ kind: 'failed', query, message: data?.error ?? 'The search didn’t go through.' });
+        return;
       }
-
-      setSearchResults(data.data);
-      setRealtimeResults(null);
-
-      const flights: Flight[] = data.data?.flights || [];
+      setState({ kind: 'done', query, data });
+      const prices = (data as SearchResponse).flights.items.map((f) => f.price);
       recordSearch({
-        origin: params.origin.city,
-        destination: params.destination.city,
-        departureDate:
-          params.departureDate instanceof Date
-            ? params.departureDate.toISOString().split('T')[0]
-            : String(params.departureDate),
-        travelClass: params.travelClass,
-        lowestPrice: flights.length
-          ? Math.min(...flights.map((f) => f.price.total))
-          : undefined,
+        origin: query.from,
+        destination: query.to,
+        departureDate: query.departureDate,
+        travelClass: query.travelClass,
+        lowestPrice: prices.length ? Math.min(...prices) : undefined,
       });
-
-      if (flights.length === 0) {
-        toast.info('No flights found for those dates', {
-          description: 'Try shifting the departure date by a day or two.',
-        });
-      }
-    } catch (error) {
-      console.error('Search error:', error);
-      toast.error("We couldn't complete that search", {
-        description: 'The flight data service did not respond. Please try again.',
-      });
-    } finally {
-      setLoading(false);
+    } catch {
+      if (id === seq.current) setState({ kind: 'failed', query, message: 'We couldn’t reach the search service. Check your connection and try again.' });
     }
+  }, []);
+
+  // The URL is the source of truth: searching updates it, and opening a link runs it.
+  const urlKey = fromURL ? queryToURL(fromURL) : '';
+  useEffect(() => {
+    if (fromURL) void run(fromURL);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlKey]);
+
+  const search = (q: SearchQuery) => {
+    const next = queryToURL(q);
+    if (next === urlKey) void run(q); // same search again: the URL will not change
+    else router.push(`${pathname}?${next}`, { scroll: false });
   };
 
-  const flights = realtimeResults ? realtimeResults.data.flights : searchResults?.flights || [];
-  const hasResults = Boolean(searchResults || realtimeResults);
-  const lowestFare = flights.length
-    ? Math.min(...flights.map((f) => f.price.total))
-    : undefined;
+  // Move focus to the results once they arrive, so keyboard and screen-reader users land on them.
+  useEffect(() => {
+    if (state.kind === 'done' || state.kind === 'failed') resultsRef.current?.focus({ preventScroll: false });
+  }, [state.kind]);
 
   return (
     <>
@@ -131,314 +125,305 @@ export default function SearchPage() {
         <header className="max-w-2xl">
           <h1 className="text-display-sm text-ink">Find a flight</h1>
           <p className="mt-3 text-ink-secondary">
-            Live fares from multiple sources. Turn on predictions to see what the model expects
-            the price to do next.
+            Live fares from Google Flights, set against what the route has cost before.
           </p>
         </header>
 
         <div className="mt-10">
-          <SearchForm onSearch={handleSearch} loading={loading} />
+          {/* Remount with the URL's search so the form shows what was searched. */}
+          <SearchForm key={urlKey} initial={fromURL ?? undefined} onSearch={search} loading={state.kind === 'loading'} />
         </div>
 
-        {/* Loading replaces the results block rather than stacking beneath it. */}
-        {loading ? (
-          <div className="mt-14 space-y-5" aria-live="polite" aria-busy="true">
-            <span className="sr-only">Searching for flights</span>
-            <Skeleton className="h-8 w-56" />
-            <Skeleton className="h-40 w-full" />
-            {[0, 1, 2].map((i) => (
-              <SkeletonCard key={i} />
-            ))}
-          </div>
-        ) : hasResults ? (
-          <div className="mt-14 space-y-8">
-            <div className="flex flex-wrap items-end justify-between gap-4">
-              <div>
-                <h2 className="text-2xl font-semibold text-ink">
-                  {flights.length} {flights.length === 1 ? 'flight' : 'flights'}
-                </h2>
-                {lowestFare !== undefined && (
-                  <p className="mt-1 text-sm text-ink-secondary [font-variant-numeric:tabular-nums]">
-                    Lowest fare {formatPrice(lowestFare)}
-                  </p>
-                )}
-              </div>
-              {searchType === 'realtime' && <Badge variant="brand">Predictions on</Badge>}
+        <div ref={resultsRef} tabIndex={-1} className="outline-none" aria-live="polite">
+          {state.kind === 'loading' && (
+            <div className="mt-14 space-y-5" aria-busy="true">
+              <span className="sr-only">Searching for flights</span>
+              <Skeleton className="h-8 w-56" />
+              <Skeleton className="h-40 w-full" />
+              {[0, 1, 2].map((i) => (
+                <SkeletonCard key={i} />
+              ))}
             </div>
+          )}
 
-            {currentSearchParams && (
-              <>
-                <PriceTrendAnalysis
-                  sourceCity={currentSearchParams.origin.city}
-                  destinationCity={currentSearchParams.destination.city}
-                  currentPrice={lowestFare}
-                  departureDate={currentSearchParams.departureDate}
-                />
-                <FareCalendar
-                  sourceCity={currentSearchParams.origin.city}
-                  destinationCity={currentSearchParams.destination.city}
-                  travelClass={currentSearchParams.travelClass}
-                />
-              </>
-            )}
+          {state.kind === 'failed' && (
+            <div role="alert" className="mt-14 rounded-lg border border-neg-fg/25 bg-neg p-6">
+              <h2 className="font-semibold text-neg-fg">The search didn’t work</h2>
+              <p className="mt-1 text-sm text-neg-fg">{state.message}</p>
+              <Button className="mt-4" variant="outline" onClick={() => void run(state.query)}>
+                <ArrowClockwise className="h-4 w-4" />
+                Try again
+              </Button>
+            </div>
+          )}
 
-            {realtimeResults?.data.priceAnalysis && (
-              <Card>
-                <CardContent className="grid gap-8 p-6 sm:grid-cols-2 lg:grid-cols-4">
-                  <div>
-                    <p className="text-sm text-ink-secondary">Historical average</p>
-                    <p className="mt-1 font-mono text-xl text-ink [font-variant-numeric:tabular-nums]">
-                      {formatPrice(realtimeResults.data.priceAnalysis.avgHistoricalPrice)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-ink-secondary">Current average</p>
-                    <p className="mt-1 font-mono text-xl text-ink [font-variant-numeric:tabular-nums]">
-                      {formatPrice(realtimeResults.data.priceAnalysis.avgCurrentPrice)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-ink-secondary">Trend</p>
-                    <p className="mt-1 flex items-center gap-1.5 font-medium capitalize text-ink">
-                      {realtimeResults.data.priceAnalysis.priceTrend === 'increasing' && (
-                        <TrendUp className="h-4 w-4 text-neg-fg" weight="bold" />
-                      )}
-                      {realtimeResults.data.priceAnalysis.priceTrend === 'decreasing' && (
-                        <TrendDown className="h-4 w-4 text-pos-fg" weight="bold" />
-                      )}
-                      {realtimeResults.data.priceAnalysis.priceTrend}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-ink-secondary">Range</p>
-                    <p className="mt-1 font-mono text-sm text-ink [font-variant-numeric:tabular-nums]">
-                      {formatPrice(realtimeResults.data.priceAnalysis.priceRange.min)} to{' '}
-                      {formatPrice(realtimeResults.data.priceAnalysis.priceRange.max)}
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+          {state.kind === 'done' && <Results query={state.query} data={state.data} onPickDate={(date) => search({ ...state.query, departureDate: date })} />}
 
-            {realtimeResults?.data.recommendations &&
-              realtimeResults.data.recommendations.length > 0 && (
-                <div className="rounded-lg border border-info-fg/20 bg-info p-6">
-                  <h3 className="font-semibold text-info-fg">What the model suggests</h3>
-                  <ul className="mt-3 space-y-2">
-                    {realtimeResults.data.recommendations.map((rec) => (
-                      <li key={rec} className="text-sm text-info-fg">
-                        {rec}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-            {realtimeResults?.data.fallback && (
-              <p className="rounded-lg border border-caution-fg/25 bg-caution px-5 py-4 text-sm text-caution-fg">
-                Live data is unavailable right now. These are sample fares with model predictions
-                applied.
-              </p>
-            )}
-
-            {/* Flights */}
-            <ul className="space-y-4">
-              {flights.map((flight) => {
-                const seg = flight.outbound[0];
-                const stops = flight.stops || seg?.stops || 0;
-                const isBest =
-                  flight.mlPrediction?.recommendation &&
-                  /excellent/i.test(flight.mlPrediction.recommendation);
-
-                return (
-                  <li key={flight.id}>
-                    <Card interactive className={isBest ? 'border-pos-fg/35' : undefined}>
-                      <CardContent className="grid gap-6 p-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
-                        <div className="grid gap-6 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)] sm:items-center">
-                          <div className="flex items-center gap-3">
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-surface-sunken">
-                              <AirplaneTilt className="h-5 w-5 text-ink-secondary" />
-                            </div>
-                            <div className="min-w-0">
-                              <p className="truncate font-medium text-ink">{flight.airline}</p>
-                              <p className="font-mono text-xs text-ink-tertiary">
-                                {seg?.flightNumber || 'Flight number pending'}
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-4">
-                            <div>
-                              <p className="font-mono text-lg text-ink [font-variant-numeric:tabular-nums]">
-                                {clockTime(seg?.departureTime)}
-                              </p>
-                              <p className="font-mono text-xs text-ink-tertiary">
-                                {seg?.origin.code}
-                              </p>
-                            </div>
-                            <div className="flex-1 text-center">
-                              <div className="h-px bg-line" />
-                              <p className="mt-1.5 text-xs text-ink-tertiary">
-                                {formatDuration(seg?.duration || 0)}
-                                {stops > 0 && ` · ${stops} stop${stops > 1 ? 's' : ''}`}
-                              </p>
-                            </div>
-                            <div className="text-right">
-                              <p className="font-mono text-lg text-ink [font-variant-numeric:tabular-nums]">
-                                {clockTime(seg?.arrivalTime)}
-                              </p>
-                              <p className="font-mono text-xs text-ink-tertiary">
-                                {seg?.destination.code}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-end justify-between gap-6 border-t border-line pt-5 lg:min-w-[13rem] lg:flex-col lg:items-end lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
-                          <div className="lg:text-right">
-                            <p className="font-mono text-2xl text-ink [font-variant-numeric:tabular-nums]">
-                              {formatPrice(flight.price.total)}
-                            </p>
-                            {flight.mlPrediction && (
-                              <div className="mt-2 space-y-1.5 lg:flex lg:flex-col lg:items-end">
-                                <p className="font-mono text-xs text-ink-tertiary [font-variant-numeric:tabular-nums]">
-                                  Predicted {formatPrice(flight.mlPrediction.predictedPrice)} ·{' '}
-                                  {Math.round(flight.mlPrediction.confidence * 100)}% confidence
-                                </p>
-                                <Badge
-                                  variant={recommendationVariant(
-                                    flight.mlPrediction.recommendation
-                                  )}
-                                >
-                                  {flight.mlPrediction.recommendation}
-                                </Badge>
-                              </div>
-                            )}
-                          </div>
-                          <Button variant={isBest ? 'brand' : 'default'} className="shrink-0">
-                            {flight.bookingUrl ? 'Book' : 'Select'}
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </li>
-                );
-              })}
-            </ul>
-
-            {/* Trains */}
-            {searchResults?.trains && searchResults.trains.length > 0 && (
-              <section className="pt-6">
-                <h2 className="text-2xl font-semibold text-ink">Trains</h2>
-                <ul className="mt-6 space-y-4">
-                  {searchResults.trains.slice(0, 6).map((train) => {
-                    const seg = train.outbound[0];
-                    return (
-                      <li key={train.id}>
-                        <Card interactive>
-                          <CardContent className="flex flex-wrap items-center justify-between gap-6 p-6">
-                            <div className="flex items-center gap-3">
-                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-surface-sunken font-mono text-xs text-ink-secondary">
-                                {seg.class}
-                              </div>
-                              <div className="min-w-0">
-                                <p className="truncate font-medium text-ink">{seg.trainName}</p>
-                                <p className="font-mono text-xs text-ink-tertiary">
-                                  {seg.trainNumber} · {train.operator}
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-6">
-                              <div>
-                                <p className="font-mono text-ink [font-variant-numeric:tabular-nums]">
-                                  {clockTime(seg.departureTime)}
-                                </p>
-                                <p className="text-xs text-ink-tertiary">{seg.origin.city}</p>
-                              </div>
-                              <p className="text-xs text-ink-tertiary">
-                                {formatDuration(seg.duration)}
-                              </p>
-                              <div>
-                                <p className="font-mono text-ink [font-variant-numeric:tabular-nums]">
-                                  {clockTime(seg.arrivalTime)}
-                                </p>
-                                <p className="text-xs text-ink-tertiary">{seg.destination.city}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-4">
-                              <p className="font-mono text-xl text-ink [font-variant-numeric:tabular-nums]">
-                                {formatPrice(train.price.total)}
-                              </p>
-                              <Button size="sm" variant="outline">
-                                Select
-                              </Button>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </section>
-            )}
-
-            {/* Hotels */}
-            {searchResults?.hotels && searchResults.hotels.length > 0 && (
-              <section className="pt-6">
-                <h2 className="text-2xl font-semibold text-ink">
-                  Hotels in {currentSearchParams?.destination.city}
-                </h2>
-                <ul className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-                  {searchResults.hotels.map((hotel) => (
-                    <li key={hotel.id} className="flex">
-                      <Card interactive className="flex w-full flex-col">
-                        <CardContent className="flex flex-1 flex-col p-6">
-                          <div className="flex items-start justify-between gap-3">
-                            <h3 className="font-medium leading-snug text-ink">{hotel.name}</h3>
-                            <span className="flex shrink-0 items-center gap-1 font-mono text-sm text-ink [font-variant-numeric:tabular-nums]">
-                              <Star className="h-3.5 w-3.5 text-caution-fg" weight="fill" />
-                              {hotel.rating.toFixed(1)}
-                            </span>
-                          </div>
-                          <p className="mt-2 text-sm text-ink-secondary">
-                            {hotel.location.address}
-                          </p>
-                          <ul className="mt-4 flex flex-wrap gap-1.5">
-                            {hotel.amenities.slice(0, 4).map((a) => (
-                              <li key={a}>
-                                <Badge variant="neutral">{a}</Badge>
-                              </li>
-                            ))}
-                          </ul>
-                          <div className="mt-auto flex items-end justify-between pt-6">
-                            <div>
-                              <p className="font-mono text-lg text-ink [font-variant-numeric:tabular-nums]">
-                                {formatPrice(hotel.rooms[0]?.price.perNight || 0)}
-                              </p>
-                              <p className="text-xs text-ink-tertiary">per night</p>
-                            </div>
-                            <Button size="sm" variant="outline">
-                              View
-                            </Button>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )}
-          </div>
-        ) : (
-          <EmptyState
-            className="mt-14"
-            icon={<AirplaneTilt className="h-6 w-6" />}
-            title="Pick a route to start"
-            description="Enter where you are flying from and to. Turn on fare predictions for routes between the six metros the model covers."
-          />
-        )}
+          {state.kind === 'idle' && (
+            <EmptyState
+              className="mt-14"
+              icon={<AirplaneTilt className="h-6 w-6" />}
+              title="Pick a route to start"
+              description="Enter where you are flying from and to. Route history covers flights between Delhi, Mumbai, Bengaluru, Chennai, Hyderabad and Kolkata."
+            />
+          )}
+        </div>
       </AppShell>
       <SiteFooter />
     </>
+  );
+}
+
+function Results({ query, data, onPickDate }: { query: SearchQuery; data: SearchResponse; onPickDate: (date: string) => void }) {
+  const { flights, hotels, history } = data;
+  const sorted = [...flights.items].sort((a, b) => a.price - b.price);
+  const lowest = sorted[0]?.price;
+  const travellers = query.adults + query.children + query.infants;
+
+  return (
+    <div className="mt-14 space-y-8">
+      <div>
+        <h2 className="text-2xl font-semibold text-ink">
+          {query.from} to {query.to}
+        </h2>
+        <p className="mt-1 text-sm text-ink-secondary">
+          {new Date(`${query.departureDate}T00:00`).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
+          {query.returnDate && `, back ${new Date(`${query.returnDate}T00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'long' })}`}
+          {' · '}
+          {travellers} {travellers === 1 ? 'traveller' : 'travellers'}
+        </p>
+      </div>
+
+      <RouteInsights from={query.from} to={query.to} departureDate={query.departureDate} travelClass={query.travelClass} lowestFare={lowest} />
+      <FareCalendar
+        sourceCity={query.from}
+        destinationCity={query.to}
+        travelClass={query.travelClass}
+        selectedDate={query.departureDate}
+        onSelectDate={onPickDate}
+      />
+
+      <section aria-labelledby="flights-heading">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <h2 id="flights-heading" className="text-xl font-semibold text-ink">
+            {flights.status === 'ok' ? `${sorted.length} ${sorted.length === 1 ? 'flight' : 'flights'}` : 'Flights'}
+          </h2>
+          {flights.status === 'ok' && flights.bookingUrl && (
+            <a
+              href={flights.bookingUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-sm text-brand underline-offset-4 hover:underline"
+            >
+              See this search on Google Flights
+              <ArrowSquareOut className="h-3.5 w-3.5" />
+            </a>
+          )}
+        </div>
+
+        {flights.status === 'ok' ? (
+          sorted.length === 0 ? (
+            <EmptyState
+              as="h3"
+              className="mt-6"
+              icon={<AirplaneTilt className="h-6 w-6" />}
+              title="No flights on that day"
+              description="Try a day either side, or choose a day from the forecast calendar above if it is showing."
+            />
+          ) : (
+            <ul className="mt-6 space-y-4">
+              {sorted.map((f) => (
+                <FlightRow key={f.id} flight={f} bookingUrl={flights.bookingUrl} lowest={f.price === lowest} />
+              ))}
+            </ul>
+          )
+        ) : (
+          <NotConnected
+            className="mt-6"
+            title={flights.message ?? 'Live fares aren’t available'}
+            body={
+              history
+                ? `Past bookings on this route averaged ${inr(history.window?.averagePrice ?? history.averagePrice)}${
+                    history.window ? ` when booked ${history.window.label} ahead` : ''
+                  }, ranging from ${inr(history.minPrice)} to ${inr(history.maxPrice)}. Those are past fares, not today’s.`
+                : 'There is no booking history for this route either, so there is nothing to show yet.'
+            }
+          />
+        )}
+      </section>
+
+      <section aria-labelledby="hotels-heading" className="pt-4">
+        <h2 id="hotels-heading" className="text-xl font-semibold text-ink">
+          Hotels in {query.to}
+        </h2>
+        {hotels.status === 'ok' ? (
+          hotels.items.length === 0 ? (
+            <p className="mt-4 text-sm text-ink-secondary">No hotels came back for those dates.</p>
+          ) : (
+            <ul className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {hotels.items.map((h) => (
+                <li key={h.id} className="flex">
+                  <Card className="flex w-full flex-col">
+                    <CardContent className="flex flex-1 flex-col p-6">
+                      <div className="flex items-start justify-between gap-3">
+                        <h3 className="font-medium leading-snug text-ink">{h.name}</h3>
+                        {h.rating !== null && (
+                          <span className={`${mono} flex shrink-0 items-center gap-1 text-sm text-ink`} title={h.reviews ? `${h.reviews} reviews` : undefined}>
+                            <Star className="h-3.5 w-3.5 text-caution-fg" weight="fill" aria-hidden />
+                            {h.rating.toFixed(1)}
+                            <span className="sr-only">out of 5</span>
+                          </span>
+                        )}
+                      </div>
+                      {h.area && <p className="mt-2 text-sm text-ink-secondary">Near {h.area}</p>}
+                      {h.amenities.length > 0 && (
+                        <ul className="mt-4 flex flex-wrap gap-1.5">
+                          {h.amenities.slice(0, 4).map((a) => (
+                            <li key={a}>
+                              <Badge variant="neutral">{a}</Badge>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      <div className="mt-auto flex items-end justify-between gap-3 pt-6">
+                        <div>
+                          {h.ratePerNight !== null ? (
+                            <>
+                              <p className={`${mono} text-lg text-ink`}>{inr(h.ratePerNight)}</p>
+                              <p className="text-xs text-ink-tertiary">per night</p>
+                            </>
+                          ) : (
+                            <p className="text-xs text-ink-tertiary">Price on request</p>
+                          )}
+                        </div>
+                        {h.link && (
+                          <Button size="sm" variant="outline" asChild>
+                            <a href={h.link} target="_blank" rel="noopener noreferrer">
+                              View
+                              <ArrowSquareOut className="h-3.5 w-3.5" />
+                              <span className="sr-only">{h.name}, opens in a new tab</span>
+                            </a>
+                          </Button>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </li>
+              ))}
+            </ul>
+          )
+        ) : (
+          <NotConnected
+            className="mt-6"
+            icon={<Bed className="h-4 w-4" />}
+            title={hotels.status === 'not_connected' ? 'Live hotel prices aren’t connected yet' : (hotels.message ?? 'Hotels didn’t load')}
+            body="We only show hotels with real prices, so there is nothing here until live results are available."
+          />
+        )}
+      </section>
+    </div>
+  );
+}
+
+function FlightRow({ flight: f, bookingUrl, lowest }: { flight: SearchFlight; bookingUrl: string | null; lowest: boolean }) {
+  const insight = f.historyInsight;
+  const tone = !insight
+    ? null
+    : insight.comparedToAverage <= -10
+      ? ('positive' as const)
+      : insight.comparedToAverage >= 10
+        ? ('negative' as const)
+        : ('neutral' as const);
+  // Times are the airports' local times, shown exactly as Google Flights gives them.
+  const nextDay = f.arriveDate && f.departDate && f.arriveDate > f.departDate;
+
+  return (
+    <li>
+      <Card className={lowest ? 'border-pos-fg/35' : undefined}>
+        <CardContent className="grid gap-6 p-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+          <div className="grid gap-6 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)] sm:items-center">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-surface-sunken">
+                <AirplaneTilt className="h-5 w-5 text-ink-secondary" />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate font-medium text-ink">{f.airline}</p>
+                {f.flightNumber && <p className="font-mono text-xs text-ink-tertiary">{f.flightNumber}</p>}
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <p className={`${mono} text-lg text-ink`}>{f.departTime}</p>
+              <div className="flex-1 text-center">
+                <div className="h-px bg-line" />
+                <p className="mt-1.5 text-xs text-ink-tertiary">
+                  {duration(f.durationMinutes)}
+                  {` · ${f.stops === 0 ? 'Non-stop' : `${f.stops} stop${f.stops > 1 ? 's' : ''}`}`}
+                </p>
+              </div>
+              <p className={`${mono} text-lg text-ink`}>
+                {f.arriveTime}
+                {nextDay && (
+                  <sup className="ml-0.5 text-xs text-caution-fg" title="Arrives the next day">
+                    +1
+                  </sup>
+                )}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-end justify-between gap-6 border-t border-line pt-5 lg:min-w-[13rem] lg:flex-col lg:items-end lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
+            <div className="lg:text-right">
+              <p className={`${mono} text-2xl text-ink`}>{inr(f.price)}</p>
+              {insight && tone && (
+                <Badge variant={tone} className="mt-2" title={`Compared with ${insight.bookings.toLocaleString('en-IN')} past bookings`}>
+                  {insight.comparedToAverage === 0
+                    ? 'Same as past average'
+                    : `${Math.abs(insight.comparedToAverage)}% ${insight.comparedToAverage < 0 ? 'below' : 'above'} past average`}
+                </Badge>
+              )}
+            </div>
+            {bookingUrl && (
+              <Button variant={lowest ? 'brand' : 'default'} className="shrink-0" asChild>
+                <a href={bookingUrl} target="_blank" rel="noopener noreferrer">
+                  Book
+                  <span className="sr-only">
+                    {' '}
+                    {f.airline} {f.departTime}, on Google Flights, opens in a new tab
+                  </span>
+                </a>
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </li>
+  );
+}
+
+function NotConnected({ title, body, className, icon }: { title: string; body: string; className?: string; icon?: React.ReactNode }) {
+  return (
+    <div className={`flex gap-3 rounded-lg border border-line bg-surface-sunken p-5 ${className ?? ''}`}>
+      <span className="mt-0.5 shrink-0 text-ink-tertiary">{icon ?? <PlugsConnected className="h-4 w-4" />}</span>
+      <div>
+        <p className="font-medium text-ink">{title}</p>
+        <p className="mt-1 text-sm text-ink-secondary">{body}</p>
+      </div>
+    </div>
+  );
+}
+
+export default function SearchPage() {
+  // useSearchParams needs a Suspense boundary for this page to stay statically rendered.
+  return (
+    <Suspense
+      fallback={
+        <AppShell width="wide">
+          <h1 className="text-display-sm text-ink">Find a flight</h1>
+          <Skeleton className="mt-10 h-96 w-full" />
+        </AppShell>
+      }
+    >
+      <SearchPageInner />
+    </Suspense>
   );
 }

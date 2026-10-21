@@ -49,6 +49,19 @@ export default function CityAutocomplete({
 
   useEffect(() => {
     setInputValue(value);
+    // A value set from outside (a link, a saved search) that names a known city counts as
+    // chosen. Otherwise a prefilled form showed "Pick a city from the list" under cities
+    // that were already right.
+    const wanted = value.trim().toLowerCase();
+    if (!wanted) return;
+    setSelectedCity((current) => {
+      if (current && (current.name.toLowerCase() === wanted || `${current.name}, ${current.country}`.toLowerCase() === wanted)) {
+        return current;
+      }
+      const pool = mlMode ? ML_DATASET_CITIES : searchCities(value, 50);
+      return pool.find((c) => c.name.toLowerCase() === wanted || `${c.name}, ${c.country}`.toLowerCase() === wanted) ?? current;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
   // Sync input field with inputValue state

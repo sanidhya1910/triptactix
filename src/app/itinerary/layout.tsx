@@ -1,8 +1,8 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'AI planner',
-  description: 'Generate a day-by-day itinerary with real flight prices, stays and per-activity costs.',
+  title: 'AI itinerary',
+  description: 'An AI-built, day-by-day itinerary with every activity, meal and stay costed.',
 };
 
 export default function Layout({ children }: { children: React.ReactNode }) {

@@ -3,7 +3,7 @@ import Image from 'next/image';
 
 const product = [
   { href: '/search', label: 'Search and compare' },
-  { href: '/itinerary', label: 'AI planner' },
+  { href: '/itinerary', label: 'AI itinerary' },
   { href: '/planner', label: 'Budget planner' },
   { href: '/dashboard', label: 'My trips' },
   { href: '/ml-dashboard', label: 'Fare data' },

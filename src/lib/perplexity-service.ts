@@ -1,10 +1,6 @@
-import { 
-  ItineraryRequest, 
-  AIItineraryResponse, 
-  Itinerary, 
-  ItineraryDay 
-} from '@/types/itinerary';
+import type { ItineraryRequest } from '@/types/itinerary';
 import { jsonrepair } from 'jsonrepair';
+import { toISODate } from '@/lib/dates';
 
 const PERPLEXITY_API_URL = 'https://api.perplexity.ai/chat/completions';
 
@@ -131,9 +127,6 @@ type ItineraryDraft = Partial<GeneratedItinerary> & {
   destination: string;
   days: GeneratedDay[];
 };
-type LegacyActivityCategory = ItineraryDay['activities'][number]['category'];
-type LegacyTimeSlot = ItineraryDay['activities'][number]['timeSlot'];
-type LegacyMealType = ItineraryDay['meals'][number]['mealType'];
 type TransportationInfo = GeneratedItinerary['transportation'];
 type BudgetBreakdown = GeneratedItinerary['budgetBreakdown'];
 type PerplexityConversationTurn = { role: 'user' | 'assistant'; content: string };
@@ -159,96 +152,72 @@ interface PerplexityResponse {
   }>;
 }
 
+/**
+ * Why an itinerary could not be generated. The route turns these into honest states
+ * for the page; nothing here substitutes a template itinerary any more.
+ */
+export class ItineraryError extends Error {
+  constructor(
+    public code: 'ai_unavailable' | 'ai_busy' | 'ai_timeout' | 'ai_failed',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ItineraryError';
+  }
+}
+
+/** Read per call: on Workers the environment is filled in per request, not at import. */
+export const isAIConfigured = () => Boolean(process.env.PERPLEXITY_API_KEY?.trim());
+
 export class PerplexityItineraryService {
   // Rate limiting tracking
   private static lastRequestTime = 0;
   private static requestCount = 0;
   private static readonly MIN_REQUEST_INTERVAL = 1000; // 1 second between requests
   private static readonly MAX_REQUESTS_PER_MINUTE = 30; // Perplexity safe default
-  private static readonly MAX_PERPLEXITY_ATTEMPTS = 2;
-  private static readonly DEFAULT_TIMEOUT_MS = 90000;
+  // One attempt with a hard cap. Two 90-second attempts plus a reformat call could keep
+  // a request open for over three minutes, long past when anyone is still waiting.
+  private static readonly MAX_PERPLEXITY_ATTEMPTS = 1;
+  private static readonly DEFAULT_TIMEOUT_MS = 50000;
 
   async generateEnhancedItinerary(request: EnhancedItineraryRequest): Promise<GeneratedItinerary> {
-    let rawResponse: string | undefined;
-    try {
-      // Check rate limiting
-      if (!this.canMakeRequest()) {
-        console.log('Rate limit reached, generating fallback itinerary...');
-        return this.generateFallbackItinerary(request, 'Rate limit reached, serving curated template instead.');
-      }
-
-      const prompt = this.buildEnhancedPrompt(request);
-      console.log('Generating enhanced itinerary with Perplexity...');
-      
-      // Update rate limiting counters
-      this.updateRequestCounters();
-
-  const tripDays = Math.max(1, this.calculateTripDays(request.startDate, request.endDate));
-  // Significantly increase token limit to ensure all days are generated
-  // Each day needs ~600-800 tokens, plus ~500 for metadata
-  const maxTokens = Math.min(4000, 1000 + tripDays * 700);
-
-  let responseText = await this.callPerplexity(prompt, 1, undefined, { maxTokens, temperature: 0.3, topP: 0.9 });
-  rawResponse = responseText;
-      console.log('Raw Perplexity response length:', responseText.length);
-
-      if (!this.containsLikelyJSON(responseText)) {
-        console.log('Perplexity response missing JSON structure, requesting reformat...');
-        const followUpPrompt = 'Your previous response did not follow the JSON-only instruction. Respond again with the same itinerary as a single valid JSON object matching the requested schema. Do NOT include any explanations, bullet points, or commentary.';
-        const reformatted = await this.callPerplexity(
-          followUpPrompt,
-          1,
-          [
-            { role: 'user', content: prompt },
-            { role: 'assistant', content: responseText }
-          ],
-          { maxTokens: Math.max(maxTokens, 2000), temperature: 0.25, topP: 0.85 }
-        );
-        if (reformatted && reformatted.trim().length > 0) {
-          responseText = reformatted;
-          rawResponse = reformatted;
-          console.log('Reformat attempt response length:', reformatted.length);
-        }
-      }
-      
-      // Parse the JSON response with enhanced error handling
-      let itineraryData: unknown;
-      try {
-        // Try parsing direct JSON first
-        itineraryData = JSON.parse(responseText);
-      } catch (parseError) {
-        console.log('Direct JSON parsing failed, attempting advanced extraction...', parseError);
-        
-        try {
-          // Enhanced JSON extraction and cleaning
-          itineraryData = this.extractAndCleanJSON(responseText);
-        } catch (extractError) {
-          console.error('Failed to extract valid JSON:', extractError);
-          console.log('Raw response (first 1000 chars):', responseText.substring(0, 1000));
-          console.log('Raw response (around position 5000):', responseText.substring(4900, 5100));
-          throw new Error(`Failed to parse Perplexity response: ${extractError instanceof Error ? extractError.message : 'Unknown error'}`);
-        }
-      }
-      
-      return this.validateAndProcessEnhancedItinerary(itineraryData, request, rawResponse);
-      
-    } catch (error) {
-      console.error('Error generating enhanced itinerary with Perplexity:', error);
-      
-      // Check if it's a rate limit error
-      if (this.isRateLimitError(error)) {
-        console.log('Rate limit error detected, generating fallback itinerary...');
-        return this.generateFallbackItinerary(request, 'Perplexity rate limit exceeded, serving curated template instead.', rawResponse);
-      }
-      
-      // For other errors, also provide fallback
-      console.log('Perplexity error occurred, generating fallback itinerary...');
-      return this.generateFallbackItinerary(
-        request,
-        error instanceof Error ? error.message : 'Perplexity error occurred, using smart template.',
-        rawResponse
-      );
+    if (!isAIConfigured()) {
+      throw new ItineraryError('ai_unavailable', 'AI itineraries aren’t connected yet.');
     }
+    if (!this.canMakeRequest()) {
+      throw new ItineraryError('ai_busy', 'Too many itineraries were requested just now. Try again in a minute.');
+    }
+
+    const prompt = this.buildEnhancedPrompt(request);
+    this.updateRequestCounters();
+    const tripDays = this.calculateTripDays(request.startDate, request.endDate);
+    // Each day needs roughly 600 to 800 tokens, plus about 500 for the rest.
+    const maxTokens = Math.min(4000, 1000 + tripDays * 700);
+
+    let responseText: string;
+    try {
+      responseText = await this.callPerplexity(prompt, 1, undefined, { maxTokens, temperature: 0.3, topP: 0.9 });
+    } catch (error) {
+      if (this.isRateLimitError(error)) {
+        throw new ItineraryError('ai_busy', 'The AI service is busy right now. Try again in a minute.');
+      }
+      if (error instanceof Error && /abort|timed? ?out/i.test(`${error.name} ${error.message}`)) {
+        throw new ItineraryError('ai_timeout', 'The AI took too long to answer. Try again, or plan fewer days.');
+      }
+      throw new ItineraryError('ai_failed', 'The AI service didn’t respond. Try again in a moment.');
+    }
+
+    let itineraryData: unknown;
+    try {
+      itineraryData = JSON.parse(responseText);
+    } catch {
+      try {
+        itineraryData = this.extractAndCleanJSON(responseText);
+      } catch {
+        throw new ItineraryError('ai_failed', 'The AI returned an itinerary we could not read. Try again.');
+      }
+    }
+    return this.validateAndProcessEnhancedItinerary(itineraryData, request, responseText);
   }
 
   private getBudgetGuidelines(budget: string): BudgetGuide {
@@ -295,69 +264,6 @@ export class PerplexityItineraryService {
     return guides[normalized];
   }
 
-  private clampNightlyRate(rate: number, guide: BudgetGuide): number {
-    const numeric = Number.isFinite(rate) ? Number(rate) : guide.defaultNightly;
-    const rounded = Math.round(numeric);
-    return Math.min(Math.max(rounded, guide.nightlyMin), guide.nightlyMax);
-  }
-
-  private normalizeAccommodationRecommendations(
-    recommendations: AccommodationRecommendationInput[] | undefined,
-    request: EnhancedItineraryRequest,
-    guide: BudgetGuide,
-    nights: number
-  ): AccommodationRecommendation[] {
-    const safeNights = Math.max(1, nights);
-    const sourceList = Array.isArray(recommendations) ? recommendations : [];
-    const totalRecommendations = Math.max(sourceList.length, 3);
-    const normalized: AccommodationRecommendation[] = [];
-
-    for (let index = 0; index < totalRecommendations; index++) {
-      const source = sourceList[index];
-      const descriptorIndex = index % guide.descriptorNames.length;
-      const nightlyRate = this.clampNightlyRate(
-        Number(source?.estimatedCostPerNight ?? source?.pricePerNight ?? guide.defaultNightly),
-        guide
-      );
-      const totalPrice = Number(source?.totalPrice) > 0
-        ? Math.round(Number(source.totalPrice))
-        : nightlyRate * safeNights;
-      const ratingRaw = Number(source?.rating);
-      const rating = Number.isFinite(ratingRaw) && ratingRaw > 0
-        ? Math.min(Math.max(ratingRaw, 3.8), 5)
-        : guide.key === 'luxury' ? 4.7 : 4.3;
-      const amenities = Array.isArray(source?.amenities) && source.amenities.length
-        ? source.amenities.slice(0, 6)
-        : ['WiFi', 'Breakfast', guide.signatureAmenities[descriptorIndex], 'City view'];
-
-      let reason = typeof source?.reason === 'string' && source.reason.trim().length > 0
-        ? source.reason.trim()
-        : `${guide.reasonPhrases[descriptorIndex]} in ${request.destination}`;
-
-      if (guide.key === 'luxury' && !reason.toLowerCase().includes('luxury')) {
-        reason = `Luxury experience • ${reason}`;
-      }
-
-      const normalizedRecommendation: AccommodationRecommendation = {
-        name: typeof source?.name === 'string' && source.name.trim().length > 0
-          ? source.name.trim()
-          : `${guide.descriptorNames[descriptorIndex]} stay in ${request.destination}`,
-        area: typeof source?.area === 'string' && source.area.trim().length > 0
-          ? source.area.trim()
-          : `Prime area of ${request.destination}`,
-        estimatedCostPerNight: nightlyRate,
-        pricePerNight: nightlyRate,
-        totalPrice,
-        rating,
-        amenities,
-        reason
-      };
-
-      normalized.push(normalizedRecommendation);
-    }
-
-    return normalized.slice(0, 3);
-  }
 
   private sleep(durationMs: number): Promise<void> {
     return new Promise((resolve) => {
@@ -414,72 +320,14 @@ export class PerplexityItineraryService {
     return fallback;
   }
 
-  private mapToLegacyActivityCategory(category: GeneratedActivity['category']): LegacyActivityCategory {
-    switch (category) {
-      case 'sightseeing':
-        return 'sightseeing';
-      case 'adventure':
-        return 'adventure';
-      case 'culture':
-        return 'cultural';
-      case 'shopping':
-        return 'shopping';
-      case 'transport':
-      case 'accommodation':
-        return 'relaxation';
-      case 'food':
-      case 'activity':
-      default:
-        return 'entertainment';
-    }
-  }
 
-  private getLegacyTimeSlot(index: number): LegacyTimeSlot {
-    if (index === 0) {
-      return 'morning';
-    }
-
-    if (index === 1) {
-      return 'afternoon';
-    }
-
-    return 'evening';
-  }
-
-  private getLegacyMealType(index: number): LegacyMealType {
-    if (index === 0) {
-      return 'lunch';
-    }
-
-    if (index === 1) {
-      return 'dinner';
-    }
-
-    return 'snack';
-  }
-
-  private normalizeDayDate(rawDate: unknown, sequentialDate: Date): string {
-    const expected = sequentialDate.toISOString().split('T')[0];
-
-    if (typeof rawDate !== 'string' || rawDate.trim().length === 0) {
-      return expected;
-    }
-
-    const parsed = new Date(rawDate);
-    if (Number.isNaN(parsed.getTime())) {
-      return expected;
-    }
-
-    const parsedISO = parsed.toISOString().split('T')[0];
-
-    const timeDrift = Math.abs(parsed.getTime() - sequentialDate.getTime());
-    const dayInMs = 24 * 60 * 60 * 1000;
-
-    if (timeDrift > dayInMs) {
-      return expected;
-    }
-
-    return parsedISO;
+  /**
+   * Day N is the start date plus N, as a local calendar date. The model's own date is
+   * ignored: it can only agree with this or be wrong. This used toISOString, which turns
+   * local midnight into the previous day in India, so every day was dated a day early.
+   */
+  private normalizeDayDate(_rawDate: unknown, sequentialDate: Date): string {
+    return toISODate(sequentialDate);
   }
 
   private canMakeRequest(): boolean {
@@ -664,7 +512,6 @@ export class PerplexityItineraryService {
       if ((error as Error)?.name === 'AbortError') {
         if (attempt < PerplexityItineraryService.MAX_PERPLEXITY_ATTEMPTS) {
           const backoff = 2000 * attempt;
-          console.log(`Perplexity timed out after ${timeoutMs}ms (attempt ${attempt}). Retrying in ${backoff}ms...`);
           await this.sleep(backoff);
           return this.callPerplexity(prompt, attempt + 1, conversation, options);
         }
@@ -686,9 +533,7 @@ export class PerplexityItineraryService {
     const messageContent = data?.choices?.[0]?.message?.content;
     if (process.env.NODE_ENV !== 'production') {
       try {
-        console.log('Perplexity message content preview:', JSON.stringify(messageContent)?.slice(0, 500));
       } catch {
-        console.log('Perplexity message content (non-serializable)');
       }
     }
 
@@ -735,7 +580,6 @@ export class PerplexityItineraryService {
         jsonText = balanced;
       } else {
         if (process.env.NODE_ENV !== 'production') {
-          console.log('Failed to locate balanced JSON structure. Preview:', workingText.slice(0, 200));
         }
         jsonText = workingText;
       }
@@ -747,8 +591,6 @@ export class PerplexityItineraryService {
     if (process.env.NODE_ENV !== 'production') {
       const preview = jsonText.slice(0, 200);
       const charCodes = preview.split('').map((char) => char.charCodeAt(0));
-      console.log('Cleaned JSON candidate preview:', preview);
-      console.log('Cleaned JSON char codes:', charCodes);
     }
 
     // Step 3: Attempt to parse with progressively more aggressive fixes
@@ -778,7 +620,6 @@ export class PerplexityItineraryService {
       try {
         return JSON.parse(parseAttempts[i]);
       } catch (error) {
-        console.log(`Parse attempt ${i + 1} failed:`, error instanceof Error ? error.message : error);
         if (i === parseAttempts.length - 1) {
           const repairSources = [jsonText, singleQuotedValues, workingText];
           for (const source of repairSources) {
@@ -786,7 +627,6 @@ export class PerplexityItineraryService {
               const repaired = jsonrepair(source);
               return JSON.parse(repaired);
             } catch (repairError) {
-              console.log('jsonrepair failed:', repairError instanceof Error ? repairError.message : repairError);
             }
           }
           return this.tryAggressiveJSONExtraction(workingText);
@@ -929,7 +769,6 @@ export class PerplexityItineraryService {
   }
 
   private tryAggressiveJSONExtraction(responseText: string): unknown {
-    console.log('Attempting aggressive JSON extraction...');
     const sanitized = this.sanitizePerplexityContent(responseText);
     const sourceText = sanitized && sanitized.length > 0 ? sanitized : responseText;
     
@@ -950,11 +789,9 @@ export class PerplexityItineraryService {
         return JSON.parse(extracted);
       }
     } catch (error) {
-      console.error('Aggressive extraction also failed:', error);
     }
     
     // Final fallback: create minimal valid structure
-    console.log('Creating minimal fallback structure...');
     throw new Error('Could not extract valid JSON structure from response');
   }
 
@@ -972,8 +809,8 @@ export class PerplexityItineraryService {
     const duration = Math.ceil((endDateObj.getTime() - startDateObj.getTime()) / (1000 * 60 * 60 * 24)) + 1;
     
     // Ensure duration is positive
-    if (duration <= 1) {
-      throw new Error(`Invalid duration: end date must be after start date - startDate: ${request.startDate}, endDate: ${request.endDate}`);
+    if (duration < 1) {
+      throw new Error(`Invalid duration: end date is before start date - startDate: ${request.startDate}, endDate: ${request.endDate}`);
     }
     
     const budgetGuide = this.getBudgetGuidelines(request.budget);
@@ -1045,7 +882,7 @@ ${request.includeFlight ? `- Include flights from ${request.flightSource || 'maj
         "area": "Location area",
         "estimatedCostPerNight": ${nightlyBudget},
         "pricePerNight": ${nightlyBudget},
-        "totalPrice": ${nightlyBudget * duration},
+        "totalPrice": ${nightlyBudget * Math.max(0, duration - 1)},
         "rating": 4.5,
         "amenities": ["WiFi", "Breakfast", "Pool", "Gym"],
         "reason": "Why this hotel"
@@ -1054,7 +891,7 @@ ${request.includeFlight ? `- Include flights from ${request.flightSource || 'maj
   },
   "budgetBreakdown": {
     ${request.includeFlight ? '"flights": 15000,' : ''}
-    "accommodation": ${nightlyBudget * duration},
+    "accommodation": ${nightlyBudget * Math.max(0, duration - 1)},
     "activities": 10000,
     "food": 5000,
     "transportation": 2000,
@@ -1088,224 +925,129 @@ ${request.includeFlight ? `- Include flights from ${request.flightSource || 'maj
 `;
   }
 
+  /**
+   * Turns the model's JSON into a GeneratedItinerary using only what the model said.
+   *
+   * This used to pad thin answers with template activities, meals and hotels ("Local
+   * Lunch Spot", "Comfortable stay in X"), clamp hotel prices into a budget band, raise
+   * every rating to at least 3.8, and still mark the result as not a fallback. Now a
+   * missing value stays missing (or zero, for a cost), and an answer with no usable days
+   * is an error rather than something to fill in.
+   */
   private validateAndProcessEnhancedItinerary(
     itineraryInput: unknown,
     request: EnhancedItineraryRequest,
     rawResponse?: string
   ): GeneratedItinerary {
     if (!this.isItineraryDraft(itineraryInput)) {
-      console.log('Invalid itinerary format, using fallback');
-      return this.generateFallbackItinerary(
-        request,
-        'Perplexity returned incomplete itinerary, using curated backup plan.',
-        rawResponse
-      );
+      throw new ItineraryError('ai_failed', 'The AI returned an itinerary we could not read.');
+    }
+    const draft = itineraryInput as ItineraryDraft;
+    const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : '');
+    const cost = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round(v) : 0);
+
+    const parsedStart = new Date(`${request.startDate}T00:00:00`);
+    const startDate = Number.isNaN(parsedStart.getTime()) ? new Date() : parsedStart;
+
+    const days: GeneratedDay[] = draft.days
+      .map((dayDraft, index): GeneratedDay | null => {
+        const activities: GeneratedActivity[] = (Array.isArray(dayDraft.activities) ? dayDraft.activities : [])
+          .map((raw) => raw as Partial<GeneratedActivity>)
+          .filter((a) => text(a.title))
+          .slice(0, 8)
+          .map((a) => ({
+            time: text(a.time),
+            title: text(a.title),
+            description: text(a.description),
+            location: text(a.location),
+            duration: typeof a.duration === 'number' ? `${a.duration} min` : text(a.duration),
+            estimatedCost: cost(a.estimatedCost),
+            category: this.getValidActivityCategory(a.category, 'activity'),
+            tips: this.normalizeStringArray(a.tips, [], 0),
+          }));
+        const meals: GeneratedMeal[] = (Array.isArray(dayDraft.meals) ? dayDraft.meals : [])
+          .map((raw) => raw as Partial<GeneratedMeal>)
+          .filter((m) => text(m.restaurant))
+          .slice(0, 4)
+          .map((m) => ({
+            time: text(m.time),
+            restaurant: text(m.restaurant),
+            cuisine: text(m.cuisine),
+            estimatedCost: cost(m.estimatedCost),
+            speciality: text(m.speciality),
+          }));
+        if (activities.length === 0 && meals.length === 0) return null;
+        const itemsTotal = [...activities, ...meals].reduce((s, x) => s + x.estimatedCost, 0);
+        const sequential = new Date(startDate);
+        sequential.setDate(sequential.getDate() + index);
+        return {
+          day: index + 1,
+          date: this.normalizeDayDate(dayDraft.date, sequential),
+          theme: text(dayDraft.theme) || `Day ${index + 1}`,
+          activities,
+          meals,
+          // The day's own items are the reliable figure; the model's daily total often isn't.
+          estimatedDailyCost: itemsTotal || cost(dayDraft.estimatedDailyCost),
+        };
+      })
+      .filter((d): d is GeneratedDay => d !== null);
+
+    if (days.length === 0) {
+      throw new ItineraryError('ai_failed', 'The AI returned an itinerary with no usable days.');
     }
 
-    const itineraryDraft = itineraryInput as ItineraryDraft;
-    const parsedStartDate = new Date(request.startDate);
-    const startDate = Number.isNaN(parsedStartDate.getTime()) ? new Date() : parsedStartDate;
-    const totalDaysCandidate = itineraryDraft.days.length || this.calculateTripDays(request.startDate, request.endDate);
-    const totalDays = Math.max(totalDaysCandidate, 1);
-    const fallbackDailyBudget = this.calculateDailyBudget(request.budget || 'mid-range', totalDays);
-    const fallbackTemplateDays = this.generateFallbackDays(request, totalDays, fallbackDailyBudget);
-    const fallbackDayDefault = fallbackTemplateDays[0];
-    const fallbackAccommodation = this.generateFallbackAccommodationInfo(request, totalDays);
-    const fallbackTransportation = this.generateFallbackTransportationInfo(
-      request,
-      fallbackDailyBudget * totalDays
-    );
-    const budgetGuide = this.getBudgetGuidelines(request.budget || 'mid-range');
-
-    const normalizedDays: GeneratedDay[] = itineraryDraft.days.map((dayDraft, index) => {
-      const fallbackDay = fallbackTemplateDays[index] ?? fallbackDayDefault;
-      const sequentialDate = new Date(startDate.getTime() + index * 24 * 60 * 60 * 1000);
-      const computedDate = this.normalizeDayDate(dayDraft.date, sequentialDate);
-
-      const providedActivities: Partial<GeneratedActivity>[] = Array.isArray(dayDraft.activities)
-        ? dayDraft.activities.map((activity) => activity as Partial<GeneratedActivity>)
-        : [];
-      const fallbackActivities = fallbackDay?.activities ?? [];
-      const mergedActivities: Partial<GeneratedActivity>[] = [...providedActivities];
-
-      if (mergedActivities.length < 4) {
-        for (const fallbackActivity of fallbackActivities) {
-          if (mergedActivities.length >= 4) {
-            break;
-          }
-          mergedActivities.push(fallbackActivity);
-        }
-      }
-
-      const normalizedActivities: GeneratedActivity[] = mergedActivities.slice(0, 6).map((activity, activityIndex) => {
-        const fallbackActivity = fallbackActivities[activityIndex];
-        const fallbackCategory = fallbackActivity?.category ?? 'activity';
-        const time = typeof activity.time === 'string'
-          ? activity.time
-          : fallbackActivity?.time ?? (activityIndex === 0 ? '09:00' : '13:00');
-        const duration = typeof activity.duration === 'string'
-          ? activity.duration
-          : typeof activity.duration === 'number'
-            ? `${activity.duration} min`
-            : fallbackActivity?.duration ?? '2 hours';
-        return {
-          time,
-          title: activity.title ?? fallbackActivity?.title ?? `Activity ${activityIndex + 1}`,
-          description:
-            activity.description ??
-            fallbackActivity?.description ??
-            `Signature experience in ${request.destination}`,
-          location: activity.location ?? fallbackActivity?.location ?? request.destination,
-          duration,
-          estimatedCost:
-            typeof activity.estimatedCost === 'number'
-              ? activity.estimatedCost
-              : fallbackActivity?.estimatedCost ?? Math.round(fallbackDailyBudget / 4),
-          category: this.getValidActivityCategory(activity.category, fallbackCategory),
-          tips: this.normalizeStringArray(activity.tips, fallbackActivity?.tips ?? [], 0)
-        };
-      });
-
-      const providedMeals: Partial<GeneratedMeal>[] = Array.isArray(dayDraft.meals)
-        ? dayDraft.meals.map((meal) => meal as Partial<GeneratedMeal>)
-        : [];
-      const fallbackMeals = fallbackDay?.meals ?? [];
-
-      while (providedMeals.length < 2 && fallbackMeals[providedMeals.length]) {
-        providedMeals.push(fallbackMeals[providedMeals.length]);
-      }
-
-      const normalizedMeals: GeneratedMeal[] = providedMeals.slice(0, 3).map((meal, mealIndex) => {
-        const fallbackMeal = fallbackMeals[mealIndex];
-        const mealBudgetMultiplier = mealIndex === 0 ? 0.18 : 0.25;
-        return {
-          time: meal.time ?? fallbackMeal?.time ?? (mealIndex === 0 ? '13:00' : '20:30'),
-          restaurant: meal.restaurant ?? fallbackMeal?.restaurant ?? 'Local Restaurant',
-          cuisine: meal.cuisine ?? fallbackMeal?.cuisine ?? 'Local',
-          estimatedCost:
-            typeof meal.estimatedCost === 'number'
-              ? meal.estimatedCost
-              : fallbackMeal?.estimatedCost ?? Math.round(fallbackDailyBudget * mealBudgetMultiplier),
-          speciality: meal.speciality ?? fallbackMeal?.speciality ?? 'Signature dish'
-        };
-      });
-
-      return {
-        day: typeof dayDraft.day === 'number' && dayDraft.day > 0 ? dayDraft.day : index + 1,
-        date: computedDate,
-        theme: dayDraft.theme ?? fallbackDay?.theme ?? this.getDayTheme(index + 1, request.travelStyle || 'cultural'),
-        activities: normalizedActivities,
-        meals: normalizedMeals,
-        estimatedDailyCost:
-          typeof dayDraft.estimatedDailyCost === 'number'
-            ? dayDraft.estimatedDailyCost
-            : fallbackDay?.estimatedDailyCost ?? fallbackDailyBudget
-      };
-    });
-
-    const accommodationInputs: AccommodationRecommendationInput[] = Array.isArray(
-      itineraryDraft.accommodation?.recommendations
+    // Nights, not days: a three-day trip is two nights.
+    const nights = Math.max(0, days.length - 1);
+    const recommendations: AccommodationRecommendation[] = (
+      Array.isArray(draft.accommodation?.recommendations) ? draft.accommodation.recommendations : []
     )
-      ? itineraryDraft.accommodation.recommendations.map((rec) => rec as AccommodationRecommendationInput)
-      : [];
+      .map((raw) => raw as AccommodationRecommendationInput)
+      .filter((r) => text(r.name))
+      .slice(0, 3)
+      .map((r) => {
+        const nightly = cost(r.pricePerNight) || cost(r.estimatedCostPerNight);
+        const rating = typeof r.rating === 'number' && r.rating > 0 && r.rating <= 5 ? r.rating : undefined;
+        return {
+          name: text(r.name),
+          area: text(r.area),
+          estimatedCostPerNight: nightly,
+          pricePerNight: nightly,
+          totalPrice: nightly * nights,
+          rating,
+          amenities: Array.isArray(r.amenities) ? r.amenities.filter((x): x is string => typeof x === 'string').slice(0, 6) : [],
+          reason: text(r.reason),
+        };
+      });
+    const accommodation = { type: text(draft.accommodation?.type) || (request.accommodationType ?? 'hotel'), recommendations };
 
-    const normalizedAccommodationRecommendations = this.normalizeAccommodationRecommendations(
-      accommodationInputs.length > 0 ? accommodationInputs : fallbackAccommodation.recommendations,
-      request,
-      budgetGuide,
-      totalDays
-    );
-
-    const accommodation = {
-      type: itineraryDraft.accommodation?.type ?? fallbackAccommodation.type,
-      recommendations: normalizedAccommodationRecommendations
-    };
-
-    const draftTransportation = itineraryDraft.transportation;
-    const needsFlights = request.includeFlight || Boolean(draftTransportation?.flights);
-
+    const t = draft.transportation;
     const transportation: TransportationInfo = {
       local: {
-        recommendations: this.normalizeStringArray(
-          draftTransportation?.local?.recommendations,
-          fallbackTransportation.local.recommendations,
-          1
-        ),
-        estimatedDailyCost:
-          typeof draftTransportation?.local?.estimatedDailyCost === 'number'
-            ? draftTransportation.local.estimatedDailyCost
-            : fallbackTransportation.local.estimatedDailyCost
-      }
+        recommendations: this.normalizeStringArray(t?.local?.recommendations, [], 0),
+        estimatedDailyCost: cost(t?.local?.estimatedDailyCost),
+      },
     };
-
-    if (needsFlights && (draftTransportation?.flights || fallbackTransportation.flights)) {
-      const outbound = draftTransportation?.flights?.outbound ?? fallbackTransportation.flights?.outbound;
-      const returnFlight = draftTransportation?.flights?.return ?? fallbackTransportation.flights?.return;
-
-      if (outbound || returnFlight) {
-        transportation.flights = {
-          outbound: {
-            estimatedCost:
-              typeof outbound?.estimatedCost === 'number'
-                ? outbound.estimatedCost
-                : fallbackTransportation.flights?.outbound.estimatedCost ?? 0,
-            tips: this.normalizeStringArray(
-              outbound?.tips,
-              fallbackTransportation.flights?.outbound.tips ?? [],
-              1
-            )
-          },
-          return: {
-            estimatedCost:
-              typeof returnFlight?.estimatedCost === 'number'
-                ? returnFlight.estimatedCost
-                : fallbackTransportation.flights?.return?.estimatedCost ?? 0,
-            tips: this.normalizeStringArray(
-              returnFlight?.tips,
-              fallbackTransportation.flights?.return?.tips ?? [],
-              1
-            )
-          }
-        };
-      }
+    // Flights come from the fare model when it is connected (request.flightBudget), and
+    // otherwise from the model's own estimate, if it gave one.
+    const out = request.flightBudget?.outbound ?? cost(t?.flights?.outbound?.estimatedCost);
+    const back = request.flightBudget?.return ?? cost(t?.flights?.return?.estimatedCost);
+    if (request.includeFlight && (out || back)) {
+      transportation.flights = {
+        outbound: { estimatedCost: out, tips: this.normalizeStringArray(t?.flights?.outbound?.tips, [], 0) },
+        return: { estimatedCost: back, tips: this.normalizeStringArray(t?.flights?.return?.tips, [], 0) },
+      };
     }
 
-    const activitiesTotal = normalizedDays.reduce(
-      (sum, day) => sum + day.activities.reduce((innerSum, activity) => innerSum + activity.estimatedCost, 0),
-      0
-    );
-    const foodTotal = normalizedDays.reduce(
-      (sum, day) => sum + day.meals.reduce((innerSum, meal) => innerSum + meal.estimatedCost, 0),
-      0
-    );
-    const accommodationPerNight =
-      accommodation.recommendations[0]?.estimatedCostPerNight ?? budgetGuide.defaultNightly;
-    const accommodationTotal = accommodationPerNight * totalDays;
-    const transportationTotal =
-      typeof itineraryDraft.budgetBreakdown?.transportation === 'number'
-        ? itineraryDraft.budgetBreakdown.transportation
-        : Math.round(transportation.local.estimatedDailyCost * totalDays);
-    const miscellaneousTotal =
-      typeof itineraryDraft.budgetBreakdown?.miscellaneous === 'number'
-        ? itineraryDraft.budgetBreakdown.miscellaneous
-        : Math.round((activitiesTotal + foodTotal) * 0.1);
-    const flightsCost =
-      typeof itineraryDraft.budgetBreakdown?.flights === 'number'
-        ? itineraryDraft.budgetBreakdown.flights
-        : transportation.flights
-          ? transportation.flights.outbound.estimatedCost + transportation.flights.return.estimatedCost
-          : 0;
-
+    const sumOf = (pick: (d: GeneratedDay) => number) => days.reduce((s, d) => s + pick(d), 0);
     const budgetBreakdown: BudgetBreakdown = {
-      flights: flightsCost || undefined,
-      accommodation: accommodationTotal,
-      activities: activitiesTotal,
-      food: foodTotal,
-      transportation: transportationTotal,
-      miscellaneous: miscellaneousTotal,
-      total: 0
+      flights: transportation.flights ? out + back || undefined : undefined,
+      accommodation: (recommendations[0]?.pricePerNight ?? 0) * nights,
+      activities: sumOf((d) => d.activities.reduce((s, a) => s + a.estimatedCost, 0)),
+      food: sumOf((d) => d.meals.reduce((s, m) => s + m.estimatedCost, 0)),
+      transportation: transportation.local.estimatedDailyCost * days.length,
+      miscellaneous: cost(draft.budgetBreakdown?.miscellaneous),
+      total: 0,
     };
-
     budgetBreakdown.total =
       (budgetBreakdown.flights ?? 0) +
       budgetBreakdown.accommodation +
@@ -1314,503 +1056,38 @@ ${request.includeFlight ? `- Include flights from ${request.flightSource || 'maj
       budgetBreakdown.transportation +
       budgetBreakdown.miscellaneous;
 
-    const defaultHighlights = [
-      `Experience the best of ${request.destination}`,
-      `Enjoy ${request.travelStyle || 'balanced'} days tailored to ${request.groupType || 'travelers'}`,
-      `Stay in curated ${accommodation.type} options`
-    ];
-
-    const tipsDraft = itineraryDraft.tips;
-    const normalizedTips = {
-      general: this.normalizeStringArray(
-        tipsDraft?.general,
-        [
-          `Best times to explore ${request.destination}`,
-          'Carry local currency for small purchases',
-          'Plan buffer time between activities'
-        ],
-        3
-      ),
-      budgetSaving: this.normalizeStringArray(
-        tipsDraft?.budgetSaving,
-        [
-          'Use public transport or shared rides',
-          'Look for attraction combo tickets',
-          'Dine where locals eat for authentic value'
-        ],
-        3
-      ),
-      cultural: this.normalizeStringArray(
-        tipsDraft?.cultural,
-        [
-          'Learn basic greetings in the local language',
-          'Respect local dress codes and customs',
-          'Always ask before photographing people'
-        ],
-        3
-      ),
-      safety: this.normalizeStringArray(
-        tipsDraft?.safety,
-        [
-          'Keep valuables secure in crowded areas',
-          'Share travel plans with a trusted contact',
-          'Use registered transport providers at night'
-        ],
-        3
-      )
-    };
-
-    const bestTimeToVisit = {
-      weather:
-        itineraryDraft.bestTimeToVisit?.weather ??
-        'Check seasonal weather trends for comfortable conditions.',
-      crowds:
-        itineraryDraft.bestTimeToVisit?.crowds ?? 'Target shoulder seasons for manageable crowds.',
-      prices:
-        itineraryDraft.bestTimeToVisit?.prices ?? 'Book accommodations and transport early to lock in rates.'
-    };
-
-    const overview =
-      typeof itineraryDraft.overview === 'string' && itineraryDraft.overview.trim().length > 0
-        ? itineraryDraft.overview.trim()
-        : `A ${totalDays}-day ${request.travelStyle || 'balanced'} trip to ${request.destination} with curated experiences, dining, and stays.`;
-
-    const highlights = this.normalizeStringArray(itineraryDraft.highlights, defaultHighlights, 3);
-
+    const tips = draft.tips;
     return {
-      destination: itineraryDraft.destination,
-      duration:
-        typeof itineraryDraft.duration === 'number' && itineraryDraft.duration > 0
-          ? itineraryDraft.duration
-          : totalDays,
-      overview,
-      highlights,
-      days: normalizedDays,
+      destination: text(draft.destination) || request.destination,
+      duration: days.length,
+      overview: text(draft.overview),
+      highlights: this.normalizeStringArray(draft.highlights, [], 0),
+      days,
       transportation,
       accommodation,
       budgetBreakdown,
-      tips: normalizedTips,
-      bestTimeToVisit,
-      isFallback: false,
-      fallbackReason: undefined,
-      debugRawResponse:
-        process.env.NODE_ENV !== 'production' ? rawResponse ?? itineraryDraft.debugRawResponse : undefined
-    };
-  }
-
-  private generateFallbackItinerary(
-    request: EnhancedItineraryRequest,
-    reason?: string,
-    debugRawResponse?: string
-  ): GeneratedItinerary {
-    console.log('Generating fallback itinerary with template...');
-    
-    const days = this.calculateTripDays(request.startDate, request.endDate);
-    const dailyBudget = this.calculateDailyBudget(request.budget || 'mid-range', days);
-    const totalBudget = dailyBudget * days;
-    
-    return {
-      destination: request.destination,
-      duration: days,
-      overview: `A ${days}-day ${request.travelStyle || 'cultural'} trip to ${request.destination} designed for ${request.travelers} travelers. This itinerary offers a perfect blend of sightseeing, cultural experiences, and relaxation within your ${request.budget || 'mid-range'} budget.`,
-      highlights: [
-        `Experience the best of ${request.destination}`,
-        `Authentic local cuisine and cultural immersion`,
-        `Comfortable ${request.accommodationType || 'hotel'} accommodation`,
-        `Flexible itinerary suitable for ${request.groupType || 'travelers'}`
-      ],
-      days: this.generateFallbackDays(request, days, dailyBudget),
-      transportation: this.generateFallbackTransportationInfo(request, totalBudget),
-      accommodation: this.generateFallbackAccommodationInfo(request, days),
-      budgetBreakdown: this.generateBudgetBreakdown(request, totalBudget, days),
       tips: {
-        general: [
-          `Best time to visit ${request.destination} varies by season`,
-          `Book accommodations and flights in advance for better rates`,
-          `Learn basic local phrases to enhance your experience`,
-          `Keep digital and physical copies of important documents`
-        ],
-        budgetSaving: [
-          'Use public transportation when possible',
-          'Eat at local restaurants rather than tourist spots',
-          'Look for free walking tours and activities',
-          'Book combo tickets for multiple attractions'
-        ],
-        cultural: [
-          'Respect local customs and dress codes',
-          'Try traditional foods and local specialties',
-          'Visit during local festivals for authentic experiences',
-          'Engage with locals to learn about their culture'
-        ],
-        safety: [
-          'Register with your embassy if traveling internationally',
-          'Keep emergency contacts readily available',
-          'Stay aware of your surroundings in crowded areas',
-          'Consider travel insurance for peace of mind'
-        ]
+        general: this.normalizeStringArray(tips?.general, [], 0),
+        budgetSaving: this.normalizeStringArray(tips?.budgetSaving, [], 0),
+        cultural: this.normalizeStringArray(tips?.cultural, [], 0),
+        safety: this.normalizeStringArray(tips?.safety, [], 0),
       },
       bestTimeToVisit: {
-        weather: 'Check seasonal weather patterns for optimal travel conditions',
-        crowds: 'Consider shoulder seasons for fewer crowds and better prices',
-        prices: 'Monitor flight and accommodation prices for the best deals'
+        weather: text(draft.bestTimeToVisit?.weather),
+        crowds: text(draft.bestTimeToVisit?.crowds),
+        prices: text(draft.bestTimeToVisit?.prices),
       },
-      isFallback: true,
-      fallbackReason: reason ?? 'Perplexity response unavailable, using smart template instead.',
-      debugRawResponse: process.env.NODE_ENV !== 'production' ? debugRawResponse : undefined
+      isFallback: false,
+      debugRawResponse: process.env.NODE_ENV !== 'production' ? rawResponse : undefined,
     };
   }
 
-  // All the helper methods remain the same as in Gemini service
-  private generateFallbackDays(
-    request: EnhancedItineraryRequest,
-    days: number,
-    dailyBudget: number
-  ): GeneratedDay[] {
-    const dayPlans: GeneratedDay[] = [];
-
-    for (let day = 1; day <= days; day++) {
-      const date = this.addDays(new Date(request.startDate), day - 1);
-      const isoDate = date.toISOString().split('T')[0];
-
-      const activities: GeneratedActivity[] = [
-        {
-          time: '08:30',
-          title: `Morning Exploration in ${request.destination}`,
-          description: `Start the day with a guided walk covering ${request.destination}'s signature sights.`,
-          location: `Central ${request.destination}`,
-          duration: '2.5 hours',
-          estimatedCost: Math.round(dailyBudget * 0.2),
-          category: 'sightseeing',
-          tips: ['Arrive early to avoid crowds', 'Wear comfortable footwear', 'Carry water']
-        },
-        {
-          time: '11:30',
-          title: 'Immersive Workshop',
-          description: 'Join a hands-on workshop or tasting session that reflects local culture.',
-          location: `Creative quarter, ${request.destination}`,
-          duration: '1.5 hours',
-          estimatedCost: Math.round(dailyBudget * 0.15),
-          category: 'activity',
-          tips: ['Book ahead to secure a spot', 'Arrive 10 minutes early']
-        },
-        {
-          time: '15:00',
-          title: 'Afternoon Signature Experience',
-          description: 'Discover a marquee attraction or outdoor adventure tailored to the group.',
-          location: `Highlight district, ${request.destination}`,
-          duration: '3 hours',
-          estimatedCost: Math.round(dailyBudget * 0.3),
-          category: 'activity',
-          tips: ['Check weather conditions', 'Carry identification', 'Plan transport back']
-        },
-        {
-          time: '19:30',
-          title: 'Evening Cultural Showcase',
-          description: 'Wind down with a cultural performance, sunset cruise, or night market tour.',
-          location: `Evening hotspot, ${request.destination}`,
-          duration: '2.5 hours',
-          estimatedCost: Math.round(dailyBudget * 0.2),
-          category: 'activity',
-          tips: ['Smart casual attire', 'Carry cash for souvenirs', 'Keep belongings secure']
-        }
-      ];
-
-      const meals: GeneratedMeal[] = [
-        {
-          time: '13:00',
-          restaurant: 'Local Lunch Spot',
-          cuisine: 'Regional',
-          estimatedCost: Math.round(dailyBudget * 0.15),
-          speciality: "Chef's specialty platter"
-        },
-        {
-          time: '20:30',
-          restaurant: 'Signature Dinner Venue',
-          cuisine: 'Local',
-          estimatedCost: Math.round(dailyBudget * 0.25),
-          speciality: 'Seasonal tasting menu'
-        }
-      ];
-
-      dayPlans.push({
-        day,
-        date: isoDate,
-        theme: this.getDayTheme(day, request.travelStyle || 'cultural'),
-        activities,
-        meals,
-        estimatedDailyCost: dailyBudget
-      });
-    }
-
-    return dayPlans;
-  }
-  
-  private generateFallbackTransportationInfo(
-    request: EnhancedItineraryRequest,
-    totalBudget: number
-  ): TransportationInfo {
-    const tripDays = Math.max(1, this.calculateTripDays(request.startDate, request.endDate));
-    const localRecommendations = [
-      'Use official taxi services or reputable ride-sharing apps',
-      'Consider daily/weekly public transport passes for savings',
-      'Walk when possible to experience the city authentically'
-    ];
-
-    const local: TransportationInfo['local'] = {
-      recommendations: localRecommendations,
-      estimatedDailyCost: Math.round((totalBudget * 0.1) / tripDays)
-    };
-
-    if (!request.includeFlight) {
-      return { local };
-    }
-
-    const flightCost = request.flightBudget
-      ? request.flightBudget.outbound + request.flightBudget.return
-      : this.estimateFlightCost(request);
-
-    const outboundCost = Math.round(flightCost / 2);
-    const returnCost = Math.max(flightCost - outboundCost, 0);
-
-    return {
-      local,
-      flights: {
-        outbound: {
-          estimatedCost: outboundCost,
-          tips: [
-            'Book in advance for better rates',
-            'Check baggage allowances',
-            'Arrive at airport 2-3 hours early for international flights'
-          ]
-        },
-        return: {
-          estimatedCost: returnCost,
-          tips: [
-            'Confirm return flight 24 hours before departure',
-            'Check visa/passport validity',
-            'Leave time for airport shopping'
-          ]
-        }
-      }
-    };
-  }
-  
-  private generateFallbackAccommodationInfo(request: EnhancedItineraryRequest, days: number) {
-    const guide = this.getBudgetGuidelines(request.budget || 'mid-range');
-    const seedRecommendations = Array.from({ length: 3 }, (_, index) => ({
-      name: `${guide.descriptorNames[index]} stay in ${request.destination}`,
-      area: `Prime area of ${request.destination}`,
-      estimatedCostPerNight: guide.defaultNightly + index * guide.nightlyStep,
-      totalPrice: (guide.defaultNightly + index * guide.nightlyStep) * Math.max(1, days),
-      rating: guide.key === 'luxury' ? 4.8 - index * 0.05 : 4.4 - index * 0.05,
-      amenities: ['WiFi', 'Breakfast', guide.signatureAmenities[index], 'City view'],
-      reason: guide.reasonPhrases[index]
-    }));
-
-    return {
-      type: request.accommodationType || 'hotel',
-      recommendations: this.normalizeAccommodationRecommendations(
-        seedRecommendations,
-        request,
-        guide,
-        Math.max(1, days)
-      )
-    };
-  }
-  
-  private generateBudgetBreakdown(
-    request: EnhancedItineraryRequest,
-    totalBudget: number,
-    days: number
-  ): BudgetBreakdown {
-  const safeDays = Math.max(days, 1);
-  const accommodation = Math.round(totalBudget * 0.35);
-  const food = Math.round(totalBudget * 0.25);
-  const activities = Math.round(totalBudget * 0.2);
-  const transportation = Math.round((totalBudget * 0.1) / safeDays) * safeDays;
-  const miscellaneous = Math.round(Math.max(totalBudget * 0.1, safeDays * 400));
-    const flights = request.includeFlight
-      ? request.flightBudget
-        ? request.flightBudget.outbound + request.flightBudget.return
-        : this.estimateFlightCost(request)
-      : 0;
-
-    const breakdown: BudgetBreakdown = {
-      flights: flights || undefined,
-      accommodation,
-      activities,
-      food,
-      transportation,
-      miscellaneous,
-      total: accommodation + activities + food + transportation + miscellaneous + flights
-    };
-
-    return breakdown;
-  }
-
-  // Helper methods
-  private getDayTheme(day: number, style: string): string {
-    const themes = {
-      cultural: ['Cultural Exploration', 'Historical Sites', 'Art & Museums', 'Local Heritage'],
-      adventure: ['Adventure Activities', 'Outdoor Exploration', 'Nature & Wildlife', 'Sports & Recreation'],
-      relaxed: ['Leisure & Relaxation', 'Scenic Views', 'Wellness Activities', 'Gentle Exploration'],
-      family: ['Family Fun', 'Kid-Friendly Activities', 'Educational Experiences', 'Entertainment'],
-      business: ['Business Meetings', 'Networking', 'Professional Tours', 'Corporate Activities']
-    };
-    
-    const styleThemes = themes[style as keyof typeof themes] || themes.cultural;
-    return styleThemes[(day - 1) % styleThemes.length];
-  }
-  
+  /** Days in the trip, counting both the first and the last day. Same-day trips are 1. */
   private calculateTripDays(startDate: string, endDate: string): number {
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-    const diffTime = Math.abs(end.getTime() - start.getTime());
-    // Add 1 to include both start and end dates (e.g., Oct 24-27 = 4 days, not 3)
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-  }
-  
-  private calculateDailyBudget(budgetType: string, days: number): number {
-    const totalBudget = this.calculateTotalBudget(budgetType, days);
-    return Math.round(totalBudget / days);
-  }
-  
-  private calculateTotalBudget(budgetType: string, days: number): number {
-    const baseBudgets = {
-      budget: 3000,
-      'mid-range': 6000,
-      luxury: 12000
-    };
-    
-    return (baseBudgets[budgetType as keyof typeof baseBudgets] || baseBudgets['mid-range']) * days;
-  }
-  
-  private getBaseCostForAccommodation(budget: string, type: string): number {
-    const costs = {
-      budget: { hostel: 800, hotel: 1500, apartment: 1200, resort: 2000 },
-      'mid-range': { hostel: 1500, hotel: 3000, apartment: 2500, resort: 4000 },
-      luxury: { hostel: 2500, hotel: 6000, apartment: 5000, resort: 8000 }
-    };
-    
-    return costs[budget as keyof typeof costs]?.[type as keyof typeof costs.budget] || 2500;
-  }
-  
-  private estimateFlightCost(request: EnhancedItineraryRequest): number {
-    return request.budget === 'luxury' ? 25000 : request.budget === 'mid-range' ? 15000 : 8000;
-  }
-  
-  private addDays(date: Date, days: number): Date {
-    const result = new Date(date);
-    result.setDate(result.getDate() + days);
-    return result;
-  }
-
-  // Legacy method for backward compatibility
-  async generateItinerary(request: ItineraryRequest): Promise<AIItineraryResponse> {
-    try {
-      const enhancedRequest: EnhancedItineraryRequest = {
-        ...request,
-        includeFlight: false,
-        groupType: 'friends',
-        fitnessLevel: 'moderate',
-        dietaryRestrictions: []
-      };
-
-  const enhancedItinerary = await this.generateEnhancedItinerary(enhancedRequest);
-
-  const primaryHotel = enhancedItinerary.accommodation.recommendations?.[0];
-  const nightlyRate = primaryHotel?.estimatedCostPerNight || 3000;
-  const durationNights = Math.max(enhancedItinerary.duration || this.calculateTripDays(request.startDate, request.endDate), 1);
-  const totalHotelPrice = primaryHotel?.totalPrice || nightlyRate * durationNights;
-
-  // Convert to legacy format
-  const legacyItinerary: Itinerary = {
-        id: `itinerary-${Date.now()}`,
-        destination: enhancedItinerary.destination,
-        startDate: request.startDate,
-        endDate: request.endDate,
-        duration: enhancedItinerary.duration,
-        totalCost: enhancedItinerary.budgetBreakdown.total,
-        days: enhancedItinerary.days.map((day, index) => ({
-          day: day.day,
-          date: day.date,
-          activities: day.activities.map((activity, actIndex) => ({
-            id: `activity-${index}-${actIndex}`,
-            name: activity.title,
-            description: activity.description,
-            location: activity.location,
-            duration: activity.duration,
-            cost: activity.estimatedCost,
-            category: this.mapToLegacyActivityCategory(activity.category),
-            timeSlot: this.getLegacyTimeSlot(actIndex),
-            tips: activity.tips
-          })),
-          meals: day.meals.map((meal, mealIndex) => ({
-            id: `meal-${index}-${mealIndex}`,
-            name: meal.speciality,
-            restaurant: meal.restaurant,
-            cuisine: meal.cuisine,
-            location: meal.restaurant,
-            cost: meal.estimatedCost,
-            mealType: this.getLegacyMealType(mealIndex)
-          })),
-          accommodation: {
-            id: `accommodation-${index}`,
-            name: enhancedItinerary.accommodation.recommendations[0]?.name || 'Hotel',
-            type: enhancedItinerary.accommodation.type,
-            location: enhancedItinerary.accommodation.recommendations[0]?.area || request.destination,
-            checkIn: day.date,
-            checkOut: day.date,
-            cost: nightlyRate,
-            nightlyRate,
-            totalPrice: totalHotelPrice,
-            nights: durationNights,
-            rating: primaryHotel?.rating ?? 4.0,
-            amenities: primaryHotel?.amenities || ['WiFi']
-          },
-          transportation: [{
-            id: `transport-${index}`,
-            type: 'taxi',
-            from: request.destination,
-            to: request.destination,
-            departure: '09:00',
-            arrival: '18:00',
-            cost: enhancedItinerary.transportation.local.estimatedDailyCost,
-            duration: '9 hours',
-            provider: 'Local Transport'
-          }],
-          estimatedCost: day.estimatedDailyCost
-        })) as ItineraryDay[],
-        summary: {
-          highlights: enhancedItinerary.highlights,
-          totalActivities: enhancedItinerary.days.reduce((sum, day) => sum + day.activities.length, 0),
-          totalMeals: enhancedItinerary.days.reduce((sum, day) => sum + day.meals.length, 0),
-          avgDailyCost: Math.round(enhancedItinerary.budgetBreakdown.total / enhancedItinerary.duration),
-          weatherInfo: {
-            temperature: '25-30°C',
-            conditions: 'Pleasant',
-            recommendation: 'Light clothes'
-          }
-        },
-        tips: enhancedItinerary.tips.general,
-        emergencyInfo: {
-          hospitals: ['City General Hospital', 'District Medical Center'],
-          emergencyNumbers: ['100 (Police)', '101 (Fire)', '108 (Ambulance)']
-        }
-      };
-
-      return {
-        success: true,
-        itinerary: legacyItinerary
-      };
-    } catch (error) {
-      console.error('Perplexity API error:', error);
-      return {
-        success: false,
-        error: 'Failed to generate itinerary with Perplexity',
-        suggestions: ['Please try again or contact support']
-      };
-    }
+    const start = new Date(`${startDate}T00:00:00`);
+    const end = new Date(`${endDate}T00:00:00`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 1;
+    return Math.max(1, Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1);
   }
 }
 
